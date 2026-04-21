@@ -4,8 +4,8 @@
 // src/lib/recipes.ts. Keeping this as a separate 'use server' file ensures
 // SPOONACULAR_API_KEY is never exposed to the client bundle.
 
-import { getRecipeSuggestions } from '@/lib/recipes';
-import { Recipe } from '@/types/pantry';
+import { getRecipeSuggestions, getRecipeDetails } from '@/lib/recipes';
+import { Recipe, RecipeDetail } from '@/types/pantry';
 
 /**
  * Server action: fetch recipe suggestions for a list of expiring ingredient names.
@@ -19,4 +19,8 @@ export async function fetchRecipeSuggestions(
   count: number = 6,
 ): Promise<Recipe[]> {
   return getRecipeSuggestions(ingredientNames, count);
+}
+
+export async function fetchRecipeDetails(recipeId: string): Promise<RecipeDetail | null> {
+  return getRecipeDetails(recipeId);
 }

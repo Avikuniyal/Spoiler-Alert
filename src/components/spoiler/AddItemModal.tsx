@@ -3,7 +3,9 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { X, ScanLine } from 'lucide-react';
 import { FoodCategory } from '@/types/pantry';
-import { getShelfLife, StorageZone, FOOD_SUGGESTIONS } from '@/lib/shelf-life';
+import { getShelfLife, getDefaultZone, getDefaultCategory, StorageZone, FOOD_SUGGESTIONS } from '@/lib/shelf-life';
+
+const TODAY = new Date().toISOString().split('T')[0];
 
 const CATEGORIES: FoodCategory[] = [
   'Produce', 'Dairy', 'Meat', 'Pantry Staples', 'Bakery', 'Frozen', 'Beverages', 'Other'
@@ -53,8 +55,10 @@ export default function AddItemModal({ onClose, onSubmit }: AddItemModalProps) {
   const [name, setName] = useState('');
   const [category, setCategory] = useState<FoodCategory>('Produce');
   const [storageZone, setStorageZone] = useState<StorageZone>('fridge');
+  const [zoneManuallyChanged, setZoneManuallyChanged] = useState(false);
+  const [categoryManuallyChanged, setCategoryManuallyChanged] = useState(false);
   const [opened, setOpened] = useState(false);
-  const [purchaseDate, setPurchaseDate] = useState('');
+  const [purchaseDate, setPurchaseDate] = useState(TODAY);
   const [expiryDate, setExpiryDate] = useState('');
   const [expiryAutoFilled, setExpiryAutoFilled] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -71,16 +75,33 @@ export default function AddItemModal({ onClose, onSubmit }: AddItemModalProps) {
   // Reset keyboard cursor when the suggestion list changes.
   useEffect(() => { setActiveSuggestion(-1); }, [suggestions]);
 
+  // Auto-set storage zone from name match, unless the user has manually picked one.
+  useEffect(() => {
+    if (name.trim().length < 3 || zoneManuallyChanged) return;
+    const zone = getDefaultZone(name.trim());
+    if (zone) setStorageZone(zone);
+  }, [name, zoneManuallyChanged]);
+
+  // Auto-set category from name match, unless the user has manually picked one.
+  useEffect(() => {
+    if (name.trim().length < 3 || categoryManuallyChanged) return;
+    const cat = getDefaultCategory(name.trim());
+    if (cat) setCategory(cat);
+  }, [name, categoryManuallyChanged]);
+
   // Auto-fill expiry date from shelf-life lookup.
+  // Base date is the purchase date when set, otherwise today.
   useEffect(() => {
     if (name.trim().length < 3) return;
     const days = getShelfLife(name.trim(), category, storageZone, opened);
-    const date = new Date();
-    date.setDate(date.getDate() + days);
-    setExpiryDate(date.toISOString().split('T')[0]);
+    // Use purchaseDate as base to avoid expiry landing before purchase date.
+    // Append T00:00:00 to force local-time parsing (bare YYYY-MM-DD parses as UTC).
+    const base = purchaseDate ? new Date(`${purchaseDate}T00:00:00`) : new Date();
+    base.setDate(base.getDate() + days);
+    setExpiryDate(base.toISOString().split('T')[0]);
     setExpiryAutoFilled(true);
     setErrors(prev => { const next = { ...prev }; delete next.expiryDate; return next; });
-  }, [name, category, storageZone, opened]);
+  }, [name, category, storageZone, opened, purchaseDate]);
 
   const selectSuggestion = (suggestion: string) => {
     setName(suggestion);
@@ -222,13 +243,18 @@ export default function AddItemModal({ onClose, onSubmit }: AddItemModalProps) {
 
           {/* Category */}
           <div className="flex flex-col gap-1.5">
-            <label className="font-crimson text-sm text-white/70">Category</label>
+            <label className="font-crimson text-sm text-white/70 flex items-center gap-1.5">
+              Category
+              {!categoryManuallyChanged && name.trim().length >= 3 && getDefaultCategory(name.trim()) && (
+                <span className="text-[#0D9488]/70 text-xs">auto-selected</span>
+              )}
+            </label>
             <div className="flex flex-wrap gap-2">
               {CATEGORIES.map(cat => (
                 <button
                   key={cat}
                   type="button"
-                  onClick={() => setCategory(cat)}
+                  onClick={() => { setCategory(cat); setCategoryManuallyChanged(true); }}
                   className={`px-3 py-1.5 rounded-full text-sm font-crimson border transition-all duration-200 ${
                     category === cat
                       ? 'bg-[#0D9488]/20 border-[#0D9488]/60 text-[#0D9488]'
@@ -243,13 +269,18 @@ export default function AddItemModal({ onClose, onSubmit }: AddItemModalProps) {
 
           {/* Storage Zone */}
           <div className="flex flex-col gap-1.5">
-            <label className="font-crimson text-sm text-white/70">Storage Location</label>
+            <label className="font-crimson text-sm text-white/70 flex items-center gap-1.5">
+              Storage Location
+              {!zoneManuallyChanged && name.trim().length >= 3 && getDefaultZone(name.trim()) && (
+                <span className="text-[#0D9488]/70 text-xs">auto-selected</span>
+              )}
+            </label>
             <div className="flex gap-2">
               {STORAGE_ZONES.map(({ value, label, icon }) => (
                 <button
                   key={value}
                   type="button"
-                  onClick={() => setStorageZone(value)}
+                  onClick={() => { setStorageZone(value); setZoneManuallyChanged(true); }}
                   className={`flex-1 py-2 rounded-[10px] text-sm font-crimson border transition-all duration-200 ${
                     storageZone === value
                       ? 'bg-[#0D9488]/20 border-[#0D9488]/60 text-[#0D9488]'
@@ -288,8 +319,12 @@ export default function AddItemModal({ onClose, onSubmit }: AddItemModalProps) {
           {/* Dates row */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="font-crimson text-sm text-white/70">
-                Purchase Date <span className="text-white/30">(optional)</span>
+              <label className="font-crimson text-sm text-white/70 flex items-center gap-1.5">
+                Purchase Date
+                {purchaseDate === TODAY
+                  ? <span className="text-[#0D9488]/70 text-xs">today</span>
+                  : <span className="text-white/30 text-xs">(defaults to today)</span>
+                }
               </label>
               <input
                 type="date"
@@ -301,9 +336,12 @@ export default function AddItemModal({ onClose, onSubmit }: AddItemModalProps) {
             <div className="flex flex-col gap-1.5">
               <label className="font-crimson text-sm text-white/70 flex items-center gap-1.5">
                 Expiry Date <span className="text-red-400/70">*</span>
-                {expiryAutoFilled && (
-                  <span className="text-[#0D9488]/70 text-xs font-crimson">auto-suggested</span>
-                )}
+                {expiryDate === TODAY
+                  ? <span className="text-amber-400/70 text-xs">today</span>
+                  : expiryAutoFilled
+                    ? <span className="text-[#0D9488]/70 text-xs">auto-suggested</span>
+                    : null
+                }
               </label>
               <input
                 type="date"

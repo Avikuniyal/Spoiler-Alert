@@ -2,9 +2,9 @@
 // Never import this file from a client component — use the server action in
 // src/app/recipe-actions.ts instead.
 
-import { Recipe } from '@/types/pantry';
+import { Recipe, RecipeDetail } from '@/types/pantry';
 
-const SPOONACULAR_BASE = 'https://api.spoonacular.com';
+const SPOONACULAR_BASE = 'https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com';
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 interface CacheEntry {
@@ -17,7 +17,23 @@ interface CacheEntry {
 // the worst case is one extra Spoonacular call after a restart.
 const recipeCache = new Map<string, CacheEntry>();
 
+interface DetailCacheEntry {
+  data: RecipeDetail;
+  expiresAt: number;
+}
+const recipeDetailCache = new Map<string, DetailCacheEntry>();
+
 // ── Spoonacular response shapes ───────────────────────────────────────────────
+
+interface SpoonacularRecipeInfo {
+  id: number;
+  readyInMinutes: number;
+  servings: number;
+  extendedIngredients: { original: string }[];
+  analyzedInstructions: { steps: { number: number; step: string }[] }[];
+  summary: string;
+  diets: string[];
+}
 
 interface SpoonacularIngredient {
   id: number;
@@ -38,6 +54,10 @@ interface SpoonacularRecipe {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').trim();
+}
 
 function buildCacheKey(ingredients: string[]): string {
   return [...ingredients].sort().join(',').toLowerCase();
@@ -93,7 +113,6 @@ export async function getRecipeSuggestions(
   }
 
   const params = new URLSearchParams({
-    apiKey,
     ingredients: ingredients.join(',+'),
     number: String(count),
     ranking: '1',          // 1 = maximize used ingredients, 2 = minimize missing
@@ -103,7 +122,13 @@ export async function getRecipeSuggestions(
   try {
     const res = await fetch(
       `${SPOONACULAR_BASE}/recipes/findByIngredients?${params}`,
-      { cache: 'no-store' }, // we manage our own caching
+      {
+        cache: 'no-store', // we manage our own caching
+        headers: {
+          'X-RapidAPI-Key': apiKey,
+          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com',
+        },
+      },
     );
 
     if (!res.ok) {
@@ -118,5 +143,47 @@ export async function getRecipeSuggestions(
   } catch (err) {
     console.error('[recipes] Failed to fetch from Spoonacular:', err);
     return [];
+  }
+}
+
+export async function getRecipeDetails(recipeId: string): Promise<RecipeDetail | null> {
+  const apiKey = process.env.SPOONACULAR_API_KEY;
+  if (!apiKey) return null;
+
+  const cached = recipeDetailCache.get(recipeId);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
+
+  try {
+    const res = await fetch(
+      `${SPOONACULAR_BASE}/recipes/${recipeId}/information`,
+      {
+        cache: 'no-store',
+        headers: {
+          'X-RapidAPI-Key': apiKey,
+          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com',
+        },
+      },
+    );
+
+    if (!res.ok) {
+      console.error(`[recipes] /information error for ${recipeId}: ${res.status}`);
+      return null;
+    }
+
+    const json: SpoonacularRecipeInfo = await res.json();
+    const detail: RecipeDetail = {
+      cookTime: json.readyInMinutes ?? 0,
+      servings: json.servings ?? 0,
+      steps: json.analyzedInstructions?.[0]?.steps?.map(s => s.step) ?? [],
+      ingredients: json.extendedIngredients?.map(i => i.original) ?? [],
+      summary: json.summary ? stripHtml(json.summary) : '',
+      diets: json.diets ?? [],
+    };
+
+    recipeDetailCache.set(recipeId, { data: detail, expiresAt: Date.now() + CACHE_TTL_MS });
+    return detail;
+  } catch (err) {
+    console.error('[recipes] Failed to fetch recipe details:', err);
+    return null;
   }
 }

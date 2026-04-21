@@ -18,13 +18,18 @@ The flow is:
 
 ## 2. Getting a Spoonacular API Key
 
-1. Go to [spoonacular.com/food-api](https://spoonacular.com/food-api) and sign up for a free account.
-2. After logging in, find your API key on the [console dashboard](https://spoonacular.com/food-api/console#Dashboard).
-3. Add it to `.env.local`:
+This project uses the **RapidAPI** version of Spoonacular, not the direct Spoonacular API. The key format and authentication are different.
+
+1. Go to [rapidapi.com](https://rapidapi.com) and sign up or log in.
+2. Search for "Spoonacular Recipe Food Nutrition" and subscribe (free tier available).
+3. Find your key under the "Header Parameters" section — it's the `X-RapidAPI-Key` value.
+4. Add it to `.env.local`:
    ```
-   SPOONACULAR_API_KEY=your_key_here
+   SPOONACULAR_API_KEY=your_rapidapi_key_here
    ```
-4. Restart the dev server. Recipe suggestions will begin working immediately.
+5. Restart the dev server. Recipe suggestions will begin working immediately.
+
+**Important:** A direct Spoonacular API key (from spoonacular.com/food-api) will return `401 Unauthorized` — it won't work. You must use the RapidAPI key.
 
 If the key is missing or blank, `getRecipeSuggestions` logs a warning and returns an empty array. The app does not crash — the recipe panel simply stays hidden.
 

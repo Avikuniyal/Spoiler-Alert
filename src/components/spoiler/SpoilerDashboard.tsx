@@ -77,27 +77,33 @@ export default function SpoilerDashboard({
     return bestScore > 0 ? best : null;
   }, [recipes, redItems, recipesLoading]);
 
-  // Stable string key so the effect only fires when the actual set of expiring
-  // items changes, not on every render (array reference would always differ).
-  const expiringNamesKey = useMemo(
-    () => [...expiringNames].sort().join(','),
+  // All item names for recipe matching: expiring first, then the rest.
+  const allItemNames = useMemo(() => {
+    const expiringSet = new Set(expiringNames);
+    const rest = items.filter(i => !expiringSet.has(i.name)).map(i => i.name);
+    return [...expiringNames, ...rest];
+  }, [items, expiringNames]);
+
+  // Stable string dep — sort so order changes don't re-trigger.
+  const allItemNamesKey = useMemo(
+    () => [...allItemNames].sort().join(','),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [expiringNames.join(',')],
+    [allItemNames.join(',')],
   );
 
   useEffect(() => {
     let cancelled = false;
     setRecipesLoading(true);
-    fetchRecipeSuggestions(expiringNames, 6).then((data) => {
+    fetchRecipeSuggestions(allItemNames, 6).then((data) => {
       if (!cancelled) {
         setRecipes(data);
         setRecipesLoading(false);
       }
     });
     return () => { cancelled = true; };
-    // expiringNamesKey is the stable dep; expiringNames is the actual value passed
+    // allItemNamesKey is the stable dep; allItemNames is the actual value passed
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expiringNamesKey]);
+  }, [allItemNamesKey]);
 
   const handleAddItem = useCallback(async (data: {
     name: string;
@@ -201,10 +207,9 @@ export default function SpoilerDashboard({
                   onWasted={handleWasted}
                   onAddItem={() => setShowAddModal(true)}
                 />
-                {(recipesLoading || expiringItems.length > 0) && (
+                {(recipesLoading || items.length > 0) && (
                   <RecipeSuggestionsPanel
                     recipes={recipes}
-                    expiringItems={expiringNames}
                     loading={recipesLoading}
                   />
                 )}
@@ -264,10 +269,9 @@ export default function SpoilerDashboard({
                   : 'Add items to your pantry to get personalized recipe suggestions'}
               </p>
             </div>
-            {(recipesLoading || expiringItems.length > 0) ? (
+            {(recipesLoading || items.length > 0) ? (
               <RecipeSuggestionsPanel
                 recipes={recipes}
-                expiringItems={expiringNames}
                 loading={recipesLoading}
               />
             ) : (

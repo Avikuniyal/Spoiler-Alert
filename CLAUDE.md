@@ -1,179 +1,133 @@
-# Spoiler Alert — Project Context for Claude
+# CLAUDE.md — Spoiler Alert
 
-## What This App Is
-
-Spoiler Alert is a food waste tracking SaaS. Users add items to a virtual pantry, get expiry date estimates automatically, see recipe suggestions based on what's about to expire, and track how much food (and money) they've saved vs. wasted.
-
-Stack: Next.js 15 App Router, Supabase (Postgres + Auth), TypeScript, Tailwind CSS, Polar (payments), Spoonacular (recipes), Sonner (toasts).
+This file is your briefing document. Read it at the start of every session before touching any code. It tells you what this project is, how it's structured, how you should think and operate, and what rules are non-negotiable.
 
 ---
 
-## Environment Variables in Use
+## What this project is
 
-All variables must be in `.env.local` locally. See `.env.example` for the full list with comments.
+Spoiler Alert is a household food management web app built with Next.js and Supabase. The core loop: users add food to their pantry/fridge, the app tracks expiry dates using USDA shelf-life data, and when something is about to go bad it surfaces a recipe suggestion (Tonight's Hero) that uses that ingredient first.
 
-| Variable | Required | Where to get it |
-|---|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project Settings → API |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase project Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase project Settings → API |
-| `POLAR_ACCESS_TOKEN` | Yes (for payments) | Polar dashboard → Settings → API |
-| `POLAR_WEBHOOK_SECRET` | Yes (for webhooks) | Polar dashboard → Webhooks |
-| `NEXT_PUBLIC_REQUIRE_SUBSCRIPTION` | No | Set to `false` in dev to bypass subscription gate |
-| `SPOONACULAR_API_KEY` | No (degrades gracefully) | spoonacular.com/food-api → Console |
+There are two user modes set at onboarding and never mixed: **family** mode (speed, kid-friendliness, dollar savings) and **performance** mode (macro tracking, protein utilization, efficiency scores). Every feature decision must respect this split — never show macro data to family users, never show community/environmental messaging to performance users.
+
+The MVP is four features only: inventory + shelf life, Tonight's Hero recipe suggestion, expiry alerts, and savings tracking. Do not build post-MVP features unless explicitly instructed.
 
 ---
 
-## Database Schema
+## The 3-layer architecture you operate within
 
-Two tables. Both are in `supabase/migrations/`.
+This project uses a strict 3-layer architecture. Understanding which layer you're in at any moment is the most important thing you can do.
 
-### `public.pantry_items`
+**Layer 1: Directives** are the SOPs that live in `directives/`. They are written in plain language and describe goals, inputs, tools, outputs, and edge cases for specific features. Always check `directives/` before starting any feature work. If a directive exists for what you're building, follow it exactly. If it doesn't exist, ask before proceeding.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | `uuid` | PK, `gen_random_uuid()` |
-| `user_id` | `text` | Auth user ID. Not a FK — no cascade on user delete |
-| `name` | `text` | Free-text, entered by user |
-| `category` | `text` | One of 8 `FoodCategory` values |
-| `purchase_date` | `date` | Nullable |
-| `expiry_date` | `date` | Required |
-| `status` | `text` | `active` / `used` / `wasted` |
-| `estimated_cost` | `numeric(10,2)` | Set at insert from `CATEGORY_COSTS`, never updated |
-| `storage_zone` | `text` | `fridge` / `freezer` / `pantry`. Nullable (pre-migration rows are null) |
-| `opened` | `boolean` | Default false. Affects shelf-life estimate |
-| `created_at` | `timestamptz` | Set at insert |
-| `updated_at` | `timestamptz` | Set manually in update calls — no DB trigger |
+**Layer 2: Orchestration** is your job. You read directives, decide which tools and scripts to call and in what order, handle errors, ask for clarification when genuinely ambiguous, and update directives when you learn something new. You are the intelligent glue between intent and execution. You do not freestyle — you follow the directive and escalate when the directive is unclear or wrong.
 
-**No RLS policies on this table.** Data isolation is app-layer only.
+**Layer 3: Execution** is the deterministic code layer — Next.js server actions in `src/app/actions.ts` and `src/app/pantry-actions.ts`, API routes in `src/app/api/`, and utility functions in `src/lib/`. This is where logic that must be consistent lives. Push complexity here, not into your own reasoning.
 
-### `public.food_logs`
-
-Append-only event log for savings tracking. Written when items are marked used or wasted. Never updated.
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | `uuid` | PK |
-| `user_id` | `text` | Auth user ID |
-| `item_id` | `uuid` | FK → `pantry_items.id`, SET NULL on delete |
-| `item_name` | `text` | Name snapshot at log time |
-| `category` | `text` | Category snapshot at log time |
-| `action` | `text` | `used` or `wasted` |
-| `savings_amount` | `numeric(10,2)` | `estimated_cost` for used, `0` for wasted |
-| `logged_at` | `timestamptz` | Set at insert |
-
-**No RLS on this table either.**
+The reason for this separation is error compounding. If you try to do everything yourself through reasoning, a 90% accuracy rate across 5 steps produces 59% overall success. Deterministic code doesn't drift. Keep your reasoning focused on routing and decisions; let the code handle the execution.
 
 ---
 
-## Server Actions
+## How to operate in this codebase
 
-All DB access goes through server actions. Never call Supabase directly from components.
+**One feature per session.** Scope every session to a single deliverable. "Build the quick-add inventory screen" is correct scope. "Build the app" is not. Announce your scope at the start of each session and confirm it before writing code.
 
-| File | Exports |
-|---|---|
-| `src/app/pantry-actions.ts` | `getPantryItems`, `addPantryItem`, `markItemUsed`, `markItemWasted`, `getExpiringItems`, `getSavingsStats` |
-| `src/app/recipe-actions.ts` | `fetchRecipeSuggestions` (server-action wrapper for Spoonacular) |
-| `src/app/actions.ts` | `checkoutSessionAction`, `manageSubscriptionAction` (Polar) |
+**Read before writing.** At the start of every session, read the relevant directive in `directives/`, the relevant existing components in `src/components/spoiler/`, and the relevant server actions before writing a single line. State what you found.
 
-### Key edge cases in pantry-actions.ts
+**Check for existing tools first.** Before writing a new server action, API route, or utility function, check whether one already exists that handles the same thing. Duplicate logic is a maintenance liability.
 
-- `markItemUsed` and `markItemWasted` do **not** verify ownership. Fetch is `.eq('id', itemId)` with no user check — a known security gap.
-- Both mark functions do three sequential writes (fetch → update → insert log). Not wrapped in a transaction. If the log insert fails, the item is already marked used/wasted with no rollback.
-- No idempotency guard — calling twice creates two log rows and double-counts savings.
-- `getSavingsStats` pulls all logs for a user with no SQL date filter — computes entirely in JS.
+**Test immediately.** After generating code, confirm it compiles and the relevant behavior works as described. Report the exact error if something fails — do not paraphrase errors.
+
+**Self-anneal when things break.** When something fails: read the error and stack trace, fix the root cause (not the symptom), test again, and then update the relevant directive with what you learned — new API constraints, timing issues, edge cases, whatever caused the break. The system should be stronger after every failure.
+
+**Update directives as you learn, but never overwrite without asking.** Directives are living documents. When you discover something new — an API rate limit, a Supabase quirk, a better approach — add it to the directive. But never delete or replace directive content without confirming with the user first. Directives are the institutional memory of this project.
 
 ---
 
-## Shelf-Life Engine — `src/lib/shelf-life.ts`
+## Tech stack reference
 
-Static USDA FoodKeeper lookup. No imports, no side effects. Safe to import anywhere.
+You need to understand what each piece of the stack does so you use the right tool for each job.
 
-**Exports:**
-- `StorageZone` — `'fridge' | 'freezer' | 'pantry'`
-- `FOOD_SUGGESTIONS` — `readonly string[]` of all 90+ food names from the data, title-cased, sorted. Used as autocomplete source in `AddItemModal`.
-- `getShelfLife(itemName, category, storageZone, opened): number` — returns days until expiry (always ≥ 1).
+**Next.js App Router** is the framework. Pages live in `src/app/` and use file-based routing. API routes live in `src/app/api/`. Server Actions (functions that run server-side but are called from components) live in `actions.ts` and `pantry-actions.ts`. Prefer Server Actions over API routes for simple data mutations — they're less boilerplate. Use API routes for anything that needs to be called from outside Next.js or needs specific HTTP verbs.
 
-**Lookup order:**
-1. Case-insensitive substring match against `names[]` arrays in `SHELF_LIFE_DATA`.
-2. If matched zone value is 0 (not recommended for that zone), falls through to category default.
-3. If no name match, uses `CATEGORY_DEFAULTS[category][storageZone]`.
+**Supabase** is the database and auth layer. The client is initialized in `src/lib/` — use the existing client, do not create a new one. Row-level security is enabled, which means queries automatically scope to the logged-in user. Never use the service role key client-side — it bypasses RLS and is a security vulnerability.
 
-**Data:** 38 named entries + category fallbacks. Values are USDA midpoints — estimates only, not label dates.
+**TypeScript** is used throughout. Always define types for function parameters and return values. Never use `any` unless absolutely unavoidable, and if you do, leave a comment explaining why.
 
----
+**Tailwind + shadcn/ui** handle styling. Use existing shadcn components from `src/components/ui/` before writing custom UI. Do not write raw CSS files — use Tailwind utility classes. Do not add inline `style` attributes unless Tailwind can't express what you need.
 
-## Spoonacular Integration — `src/lib/recipes.ts` + `src/app/recipe-actions.ts`
+**Polar** handles payments. The client lives in `src/lib/polar.ts`. Do not hardcode prices or product IDs — read them from environment variables.
 
-Server-only. The API key must never reach the client bundle.
+**Spoonacular** provides recipe data. The fetching logic lives in `src/lib/recipes.ts`. Always cache Spoonacular responses — the free tier has a daily request limit. Never call Spoonacular client-side; always proxy through a server action or API route to keep the API key hidden.
 
-- **Endpoint:** `GET /recipes/findByIngredients?ingredients=...&number=6&ranking=1&ignorePantry=false`
-- **Cache:** Module-level `Map` with 1-hour TTL. Cache key = sorted, lowercased ingredient names joined by comma.
-- **Free tier:** 150 points/day. Each call for 6 results costs 6 points = 25 triggers/day max.
-- **Steps/cook time:** Not returned by `findByIngredients`. Always empty/`'—'`. Recipe links go to Spoonacular site.
-- **On missing key or API error:** Returns `[]` gracefully — no crash, recipe panel simply hides.
-
-The `fetchRecipeSuggestions` server action in `recipe-actions.ts` is the only entry point for client code.
+**USDA FoodKeeper** shelf-life data is embedded as static JSON. It does not require an API call. When computing `expires_at` for a new inventory item, use this data — category + storage zone + opened/sealed status maps to a day range. Use the midpoint of the range for the default expiry window.
 
 ---
 
-## Urgency Tiers
+## Database schema (Supabase)
 
-Every expiry date maps to one of four levels via `getUrgency()` in `src/types/pantry.ts`.
+These are the core tables. Do not add columns or create new tables without updating this section and the relevant directive.
 
-| Level | Condition | UI treatment |
-|---|---|---|
-| `expired` | `daysLeft < 0` | Dark red, static dot, strikethrough in alert strip |
-| `red` | `daysLeft 0–1` | Bright red, pulsing dot, eligible for Tonight's Hero |
-| `amber` | `daysLeft 2–3` | Amber, pulsing dot, shown in alert strip |
-| `green` | `daysLeft 4+` | Teal, no dot, not shown in alert strip |
+`inventory_items` — id, user_id, name, category, quantity, unit, storage_zone, status (active | used | wasted | frozen), source (voice | quick_add | barcode | receipt | scanner), opened (boolean), added_at, expires_at, used_at, price_cents.
 
-Always call `getUrgency(item.expiry_date)` — never compute days directly in components.
+`waste_log` — id, inventory_item_id, reason (expired | manual), logged_at.
 
----
+`suggestions` — id, user_id, recipe_id, trigger_item_id (the expiring item that triggered this), suggested_at, status (shown | cooked | skipped | rejected), profile_type.
 
-## Key Component Behaviors
+`nudges` — id, user_id, type (quantity | swap | timing | pre_shop | freeze), message, delivered_at, status (pending | acted | dismissed).
 
-### AddItemModal
-- Typeahead autocomplete on name input: suggestions come from `FOOD_SUGGESTIONS` in shelf-life.ts. Starts-with matches ranked above contains matches, max 6 shown. Keyboard navigable (↑↓ Enter Esc). Click selects.
-- Auto-fills expiry date via `getShelfLife()` whenever name ≥ 3 chars, category, storageZone, or opened changes. Shows "auto-suggested" label.
-- Barcode scan button exists but is a no-op (placeholder for future feature).
-- On submit error: logs to console but shows no UI error to the user.
-
-### SpoilerDashboard
-- Owns `items`, `expiringItems`, `recipes`, `savings` state.
-- `expiringItems` is initialized from server-fetched `initialExpiringItems` (result of `getExpiringItems(userId, 3)`) and updated client-side on add/used/wasted.
-- Recipe fetch runs in a `useEffect` gated on `expiringNamesKey` — a memoized stable string to avoid infinite loops.
-- `redItems` = `expiringItems` filtered to level `'red'`. `heroRecipe` = best scoring recipe against red item names. Both are `useMemo`.
-
-### TonightsHeroCard
-- Only renders on dashboard tab when there are red-tier items AND at least one recipe with `bestScore > 0` (at least one matched ingredient).
-- Not an extra API call — derives from already-fetched `recipes` state.
+`savings` — user_id, month, items_saved_count, dollars_saved, protein_utilization_pct.
 
 ---
 
-## Development Flags
+## Rules that are never negotiable
 
-- `NEXT_PUBLIC_REQUIRE_SUBSCRIPTION=false` — bypasses the Polar subscription check in `dashboard/page.tsx`. Set this in dev so you can use the dashboard without a Polar account.
-- `SPOONACULAR_API_KEY=` (blank) — disables recipe fetching entirely. App falls back gracefully.
+**Never mix profile types.** Family users never see macros, protein utilization, or efficiency scores. Performance users never see community messaging, environmental guilt framing, or dollar-savings-as-experiences. This is enforced at the component level using the `profile_type` field on the user record.
+
+**Never call Spoonacular client-side.** The API key must stay server-side. Always route through a server action or API route.
+
+**Never use the Supabase service role key client-side.** It bypasses row-level security and exposes every user's data.
+
+**Never build post-MVP features.** The MVP is: inventory, shelf life, Tonight's Hero, expiry alerts, savings tracker. Delivery sync, fridge scanner, meal planning, community features, and advanced composting are explicitly post-launch. If a user request would require one of these, flag it and note it as post-launch scope.
+
+**Never share food past expiry.** The sharing feature (post-launch) may only surface items that are surplus but still within their safe consumption window. Items flagged as at-risk or past expiry route to the recipe engine or compost classification only. This is a hard rule, not a user setting.
+
+**Always write comments on non-obvious logic.** Especially in the shelf-life engine, scoring algorithm, and nudge engine. The next person reading this code (including you, three weeks from now) should understand *why* a decision was made, not just what it does.
 
 ---
 
-## Known Gaps (Post-MVP)
+## File organization
 
-**Security (must fix before real users):**
-- Add RLS policies on `pantry_items` and `food_logs`.
-- Add `.eq('user_id', userId)` ownership check to `markItemUsed` and `markItemWasted`.
+`src/app/` — pages and routing. Each subfolder is a route. Server actions live here.
 
-**Data integrity:**
-- Wrap mark-used/wasted in a Postgres transaction or RPC.
-- Add idempotency check (`status !== 'active'`) before marking.
+`src/components/spoiler/` — all app-specific components. This is where your UI work happens.
 
-**Missing features:**
-- Edit item (no mutation exists for updating name/category/dates).
-- Delete item (no way to remove a phantom item without polluting logs).
-- Free plan item limit enforcement (10 items — not checked server-side).
-- Expiry notifications (email/push when items approach expiry).
-- Persistent recipe cache (Redis / Vercel KV — current in-memory cache dies on deploy).
-- Barcode scanning.
-- Quantity tracking.
+`src/components/ui/` — generic shadcn primitives. Do not put app-specific logic here.
+
+`src/lib/` — external service clients and utility functions. One file per service.
+
+`src/hooks/` — custom React hooks. Stateful logic that needs to be shared across components.
+
+`directives/` — SOPs for each feature area. Read before building. Update after learning.
+
+`supabase/` — database migrations and generated types. Run `supabase gen types typescript` after any schema change to keep types in sync.
+
+`.tmp/` — temporary files used during processing. Never commit. Always regenerated.
+
+---
+
+## Self-annealing loop
+
+When something breaks, follow this sequence exactly: read the error and stack trace, identify the root cause (not the symptom), fix it, test that the fix works, and then update the relevant directive or this file with what you learned. Do not skip the last step. The system gets stronger after every failure because the learning is written down. If you skip writing it down, the next session starts from scratch.
+
+---
+
+## When to ask vs. when to proceed
+
+Ask before proceeding when: the directive is missing or contradicts itself, the task requires creating a new database table or changing the schema, the task is ambiguous in a way that could cause you to build the wrong thing entirely, or the task involves a paid API call that could incur unexpected costs.
+
+Proceed without asking when: the task is clearly scoped in a directive, you are fixing a bug and the fix is obvious, you are adding a comment or updating documentation, or you are writing a test.
+
+---
+
+*This file is a living document. Update it when you learn something that future sessions should know. Never delete content without confirming with the user first.*

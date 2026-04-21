@@ -47,6 +47,15 @@ export interface Recipe {
   sourceUrl?: string; // link to full recipe on Spoonacular
 }
 
+export interface RecipeDetail {
+  cookTime: number;      // readyInMinutes from Spoonacular /information
+  servings: number;
+  steps: string[];       // analyzedInstructions[0].steps[].step
+  ingredients: string[]; // extendedIngredients[].original — includes amounts
+  summary: string;       // plain text description (HTML stripped)
+  diets: string[];       // e.g. ['vegetarian', 'gluten-free']
+}
+
 export interface UrgencyLevel {
   // expired: past expiry date — distinct from red (shown differently in UI)
   // red:     expires today or tomorrow (0–1 days)

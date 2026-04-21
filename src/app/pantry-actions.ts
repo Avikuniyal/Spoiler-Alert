@@ -29,25 +29,37 @@ export async function addPantryItem(formData: {
   const supabase = await createClient();
   const estimatedCost = CATEGORY_COSTS[formData.category] || 4.0;
 
-  const { data, error } = await supabase
-    .from('pantry_items')
-    .insert({
-      user_id: formData.userId,
-      name: formData.name,
-      category: formData.category,
-      purchase_date: formData.purchaseDate || null,
-      expiry_date: formData.expiryDate,
-      status: 'active',
-      estimated_cost: estimatedCost,
-      storage_zone: formData.storageZone ?? null,
-      opened: formData.opened ?? false,
-    })
-    .select()
-    .single();
+  // Try inserting with storage_zone and opened first.
+  // If the migration hasn't been applied yet (code 42703 = column does not exist),
+  // fall back to the base columns so inserts don't break the whole app.
+  const fullPayload = {
+    user_id: formData.userId,
+    name: formData.name,
+    category: formData.category,
+    purchase_date: formData.purchaseDate || null,
+    expiry_date: formData.expiryDate,
+    status: 'active',
+    estimated_cost: estimatedCost,
+    storage_zone: formData.storageZone ?? null,
+    opened: formData.opened ?? false,
+  };
 
-  if (error) throw error;
+  let result = await supabase.from('pantry_items').insert(fullPayload).select().single();
+
+  if (result.error?.code === '42703') {
+    // storage_zone or opened column missing — migration not applied yet. Retry without them.
+    console.warn('[addPantryItem] storage_zone/opened columns missing — falling back to base insert. Run the migration at /api/apply-migration to fix this.');
+    const { storage_zone: _sz, opened: _op, ...basePayload } = fullPayload;
+    result = await supabase.from('pantry_items').insert(basePayload).select().single();
+  }
+
+  if (result.error) {
+    console.error('[addPantryItem] Supabase insert error:', JSON.stringify(result.error, null, 2));
+    throw result.error;
+  }
+
   revalidatePath('/dashboard');
-  return data;
+  return result.data;
 }
 
 export async function markItemUsed(itemId: string, userId: string) {

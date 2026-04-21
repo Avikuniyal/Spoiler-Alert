@@ -3,10 +3,14 @@
 // A value of 0 means "not recommended for this storage zone" — callers
 // should fall back to the category default in that case.
 
+import type { FoodCategory } from '@/types/pantry';
+
 export type StorageZone = 'fridge' | 'freezer' | 'pantry';
 
 interface ShelfLifeEntry {
   names: string[];
+  defaultZone: StorageZone; // most common way this item is stored when bought fresh
+  defaultCategory: FoodCategory;
   fridge: { unopened: number; opened: number };
   freezer: { unopened: number; opened: number };
   pantry: { unopened: number; opened: number };
@@ -18,102 +22,136 @@ const SHELF_LIFE_DATA: ShelfLifeEntry[] = [
   // ── PRODUCE ────────────────────────────────────────────────────────────────
   {
     names: ['cherry tomato', 'cherry tomatoes', 'grape tomato', 'grape tomatoes'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 7, opened: 7 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 4, opened: 4 },
   },
   {
     names: ['baby spinach'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 7, opened: 4 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['strawberry', 'strawberries'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 5, opened: 3 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['avocado', 'avocados'],
+    defaultZone: 'pantry', // usually bought unripe, stored on counter to ripen
+    defaultCategory: 'Produce',
     fridge: { unopened: 5, opened: 2 },
     freezer: { unopened: 90, opened: 90 },
     pantry: { unopened: 3, opened: 1 },
   },
   {
     names: ['mushroom', 'mushrooms', 'button mushroom'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 7, opened: 5 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['apple', 'apples'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 42, opened: 42 },
     freezer: { unopened: 300, opened: 300 },
     pantry: { unopened: 10, opened: 10 },
   },
   {
     names: ['banana', 'bananas'],
+    defaultZone: 'pantry', // counter-ripening is standard
+    defaultCategory: 'Produce',
     fridge: { unopened: 6, opened: 6 },
     freezer: { unopened: 60, opened: 60 },
     pantry: { unopened: 3, opened: 3 },
   },
   {
     names: ['broccoli'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 5, opened: 5 },
     freezer: { unopened: 365, opened: 365 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['carrot', 'carrots', 'baby carrot', 'baby carrots'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 28, opened: 28 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 4, opened: 4 },
   },
   {
     names: ['lettuce', 'romaine', 'iceberg'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 10, opened: 5 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['spinach'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 7, opened: 4 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['tomato', 'tomatoes'],
+    defaultZone: 'pantry', // room temp preserves flavor better
+    defaultCategory: 'Produce',
     fridge: { unopened: 10, opened: 10 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 6, opened: 6 },
   },
   {
     names: ['onion', 'onions', 'red onion'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Produce',
     fridge: { unopened: 60, opened: 10 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 30, opened: 10 },
   },
   {
     names: ['garlic'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Produce',
     fridge: { unopened: 14, opened: 7 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 120, opened: 30 },
   },
   {
     names: ['bell pepper', 'bell peppers', 'capsicum'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 10, opened: 4 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 2, opened: 2 },
   },
   {
     names: ['cucumber', 'cucumbers'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 7, opened: 5 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 2, opened: 2 },
   },
   {
     names: ['lemon', 'lemons', 'lime', 'limes'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Produce',
     fridge: { unopened: 21, opened: 7 },
     freezer: { unopened: 120, opened: 120 },
     pantry: { unopened: 7, opened: 3 },
@@ -122,48 +160,64 @@ const SHELF_LIFE_DATA: ShelfLifeEntry[] = [
   // ── DAIRY ──────────────────────────────────────────────────────────────────
   {
     names: ['cream cheese'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 14, opened: 10 },
     freezer: { unopened: 60, opened: 60 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['heavy cream', 'whipping cream', 'heavy whipping cream'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 21, opened: 7 },
     freezer: { unopened: 90, opened: 90 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['greek yogurt', 'yogurt', 'yoghurt'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 14, opened: 7 },
     freezer: { unopened: 60, opened: 60 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['milk', 'whole milk', 'skim milk', '2% milk', 'oat milk', 'almond milk'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 14, opened: 7 },
     freezer: { unopened: 90, opened: 90 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['egg', 'eggs', 'large eggs'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 35, opened: 21 },
     freezer: { unopened: 365, opened: 365 },
     pantry: { unopened: 14, opened: 7 },
   },
   {
     names: ['butter', 'unsalted butter', 'salted butter'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 90, opened: 30 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 1, opened: 1 },
   },
   {
     names: ['cheese', 'cheddar', 'mozzarella', 'parmesan', 'gouda', 'swiss cheese', 'brie'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 60, opened: 21 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['sour cream'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Dairy',
     fridge: { unopened: 21, opened: 7 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 0, opened: 0 },
@@ -172,48 +226,64 @@ const SHELF_LIFE_DATA: ShelfLifeEntry[] = [
   // ── MEAT ───────────────────────────────────────────────────────────────────
   {
     names: ['chicken breast', 'chicken thigh', 'chicken thighs', 'chicken wings', 'chicken legs', 'chicken'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 2, opened: 1 },
     freezer: { unopened: 270, opened: 270 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['ground beef', 'beef mince', 'hamburger meat'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 2, opened: 1 },
     freezer: { unopened: 120, opened: 120 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['pork chop', 'pork chops', 'pork loin', 'pork'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 4, opened: 2 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['bacon'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 7, opened: 4 },
     freezer: { unopened: 30, opened: 30 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['steak', 'sirloin', 'ribeye', 'beef steak', 'beef'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 4, opened: 3 },
     freezer: { unopened: 365, opened: 365 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['salmon', 'tilapia', 'cod', 'tuna steak', 'fish fillet', 'fish'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 2, opened: 1 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['shrimp', 'prawns'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 2, opened: 1 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['deli meat', 'lunch meat', 'turkey slices', 'ham slices', 'salami'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Meat',
     fridge: { unopened: 14, opened: 5 },
     freezer: { unopened: 60, opened: 60 },
     pantry: { unopened: 0, opened: 0 },
@@ -222,54 +292,72 @@ const SHELF_LIFE_DATA: ShelfLifeEntry[] = [
   // ── PANTRY STAPLES ─────────────────────────────────────────────────────────
   {
     names: ['all purpose flour', 'all-purpose flour', 'flour'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 365, opened: 365 },
     pantry: { unopened: 365, opened: 180 },
   },
   {
     names: ['olive oil', 'vegetable oil', 'canola oil', 'cooking oil'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 365, opened: 90 },
   },
   {
     names: ['canned beans', 'black beans', 'kidney beans', 'chickpeas', 'garbanzo', 'canned tomatoes'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 4, opened: 4 },
     freezer: { unopened: 180, opened: 180 },
     pantry: { unopened: 1095, opened: 4 },
   },
   {
     names: ['pasta', 'spaghetti', 'penne', 'fettuccine', 'linguine', 'rigatoni'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 730, opened: 365 },
   },
   {
     names: ['white rice', 'brown rice', 'jasmine rice', 'rice'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 1825, opened: 365 },
   },
   {
     names: ['bread', 'sourdough', 'sandwich bread', 'white bread', 'whole wheat bread'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Bakery',
     fridge: { unopened: 14, opened: 7 },
     freezer: { unopened: 90, opened: 90 },
     pantry: { unopened: 7, opened: 5 },
   },
   {
     names: ['sugar', 'white sugar', 'brown sugar', 'caster sugar'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 3650, opened: 3650 },
   },
   {
     names: ['honey'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 3650, opened: 3650 },
   },
   {
     names: ['peanut butter', 'almond butter', 'nut butter'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Pantry Staples',
     fridge: { unopened: 270, opened: 90 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 180, opened: 90 },
@@ -278,18 +366,24 @@ const SHELF_LIFE_DATA: ShelfLifeEntry[] = [
   // ── FROZEN ─────────────────────────────────────────────────────────────────
   {
     names: ['ice cream', 'gelato', 'sorbet', 'frozen yogurt'],
+    defaultZone: 'freezer',
+    defaultCategory: 'Frozen',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 120, opened: 60 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['frozen peas', 'frozen corn', 'frozen broccoli', 'frozen vegetables', 'mixed vegetables'],
+    defaultZone: 'freezer',
+    defaultCategory: 'Frozen',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 270, opened: 180 },
     pantry: { unopened: 0, opened: 0 },
   },
   {
     names: ['frozen pizza'],
+    defaultZone: 'freezer',
+    defaultCategory: 'Frozen',
     fridge: { unopened: 0, opened: 0 },
     freezer: { unopened: 60, opened: 30 },
     pantry: { unopened: 0, opened: 0 },
@@ -298,18 +392,24 @@ const SHELF_LIFE_DATA: ShelfLifeEntry[] = [
   // ── BEVERAGES ──────────────────────────────────────────────────────────────
   {
     names: ['orange juice', 'apple juice', 'grapefruit juice', 'juice'],
+    defaultZone: 'fridge',
+    defaultCategory: 'Beverages',
     fridge: { unopened: 14, opened: 7 },
     freezer: { unopened: 365, opened: 365 },
     pantry: { unopened: 7, opened: 3 },
   },
   {
     names: ['red wine', 'white wine', 'rosé', 'wine'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Beverages',
     fridge: { unopened: 1825, opened: 5 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 1825, opened: 1 },
   },
   {
     names: ['beer', 'lager', 'ale', 'craft beer'],
+    defaultZone: 'pantry',
+    defaultCategory: 'Beverages',
     fridge: { unopened: 180, opened: 1 },
     freezer: { unopened: 0, opened: 0 },
     pantry: { unopened: 120, opened: 1 },
@@ -346,6 +446,32 @@ export const FOOD_SUGGESTIONS: readonly string[] = Array.from(
     ),
   ),
 ).sort() as readonly string[];
+
+export function getDefaultCategory(itemName: string): FoodCategory | null {
+  const normalized = itemName.toLowerCase().trim();
+  for (const entry of SHELF_LIFE_DATA) {
+    const matched = entry.names.some(
+      (n) => normalized.includes(n) || n.includes(normalized),
+    );
+    if (matched) return entry.defaultCategory;
+  }
+  return null;
+}
+
+/**
+ * Returns the most common storage zone for an item by name.
+ * Returns null if the item is not in the database (caller should keep current zone).
+ */
+export function getDefaultZone(itemName: string): StorageZone | null {
+  const normalized = itemName.toLowerCase().trim();
+  for (const entry of SHELF_LIFE_DATA) {
+    const matched = entry.names.some(
+      (n) => normalized.includes(n) || n.includes(normalized),
+    );
+    if (matched) return entry.defaultZone;
+  }
+  return null;
+}
 
 /**
  * Returns estimated days until expiry for a food item.

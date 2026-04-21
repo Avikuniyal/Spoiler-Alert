@@ -29,7 +29,7 @@ The source of truth for what food a user currently has.
 
 **Indexes:** `user_id`, `status`
 
-**Important:** There are no Row Level Security (RLS) policies on this table. Data isolation is enforced only at the application layer.
+**Important:** RLS is enabled on this table. There is at least one policy that blocks unauthenticated inserts (confirmed via `42501` error with anon key). The app uses the SSR Supabase client (`supabase/server.ts`) which reads the user's session cookie and includes their JWT — authenticated inserts pass the policy. The exact policy definition has not been introspected (no `pg_policies` RPC available), but the pattern is presumed to be `auth.uid()::text = user_id`.
 
 ---
 
@@ -50,7 +50,7 @@ An append-only event log. Every time an item is marked used or wasted, a row lan
 
 **Indexes:** `user_id`, `action`
 
-**Important:** No RLS on this table either.
+**Important:** RLS is enabled here too (same project-level setting as `pantry_items`).
 
 ---
 
@@ -443,7 +443,31 @@ export type StorageZone = 'fridge' | 'freezer' | 'pantry';
 
 ---
 
-## 5. Known Limitations and Edge Cases
+## 5. Migration Status
+
+### `storage_zone` and `opened` columns
+
+These columns are defined in `supabase/migrations/20240602_add_storage_fields.sql` but **have not been applied to the live Supabase database** as of the time this was written.
+
+**Symptom:** `addPantryItem` was returning Supabase error `{code: "42703", message: "column pantry_items.storage_zone does not exist"}`, silently swallowed by `handleSubmit`, causing the Add Item button to appear to do nothing.
+
+**Current fix:** `addPantryItem` now attempts the full insert first. If it receives a `42703` error, it automatically retries without `storage_zone` and `opened` so items save immediately. A console warning is logged pointing to the migration.
+
+**To fully fix:** Apply the migration in the Supabase dashboard SQL editor:
+```
+https://supabase.com/dashboard/project/rkakeuvfauojzctromyx/editor
+```
+Run:
+```sql
+ALTER TABLE public.pantry_items
+  ADD COLUMN IF NOT EXISTS storage_zone text,
+  ADD COLUMN IF NOT EXISTS opened boolean DEFAULT false;
+```
+After this is applied, the full insert will succeed on the first attempt and `storage_zone`/`opened` will be saved correctly.
+
+---
+
+## 6. Known Limitations and Edge Cases
 
 These are issues in the current code that will cause bugs or security problems as the app scales. They are not hypothetical — they will bite you.
 
