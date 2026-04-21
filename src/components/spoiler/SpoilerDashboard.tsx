@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import { PantryItem, FoodCategory, getUrgency } from '@/types/pantry';
-import { getMatchingRecipes } from '@/lib/recipes';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { PantryItem, FoodCategory, Recipe, getUrgency } from '@/types/pantry';
+import { fetchRecipeSuggestions } from '@/app/recipe-actions';
 import SpoilerSidebar, { SpoilerBottomNav } from '@/components/spoiler/SpoilerSidebar';
 import SpoilerScoreBar from '@/components/spoiler/SpoilerScoreBar';
 import ExpiryAlertStrip from '@/components/spoiler/ExpiryAlertStrip';
@@ -10,6 +10,7 @@ import PantryGrid from '@/components/spoiler/PantryGrid';
 import RecipeSuggestionsPanel from '@/components/spoiler/RecipeSuggestionsPanel';
 import SavingsWidget from '@/components/spoiler/SavingsWidget';
 import AddItemModal from '@/components/spoiler/AddItemModal';
+import TonightsHeroCard from '@/components/spoiler/TonightsHeroCard';
 import { addPantryItem, markItemUsed, markItemWasted } from '@/app/pantry-actions';
 import { toast } from 'sonner';
 
@@ -17,6 +18,7 @@ type NavTab = 'dashboard' | 'pantry' | 'recipes' | 'savings';
 
 interface SpoilerDashboardProps {
   initialItems: PantryItem[];
+  initialExpiringItems: PantryItem[];
   userId: string;
   userEmail: string;
   savings: {
@@ -30,6 +32,7 @@ interface SpoilerDashboardProps {
 
 export default function SpoilerDashboard({
   initialItems,
+  initialExpiringItems,
   userId,
   userEmail,
   savings: initialSavings,
@@ -39,19 +42,82 @@ export default function SpoilerDashboard({
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [showAddModal, setShowAddModal] = useState(false);
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(true);
 
-  const expiringItems = items.filter(item => getUrgency(item.expiry_date).level !== 'green');
+  // Sourced from server-side getExpiringItems(userId, 3) on initial load.
+  // Updated client-side when items are marked used/wasted or added.
+  const [expiringItems, setExpiringItems] = useState<PantryItem[]>(initialExpiringItems);
   const expiringNames = expiringItems.map(item => item.name);
-  const recipes = getMatchingRecipes(expiringNames, 3);
+
+  // Red-tier items: expires today or tomorrow (0–1 days). Used for Tonight's Hero.
+  const redItems = useMemo(
+    () => expiringItems.filter(i => getUrgency(i.expiry_date).level === 'red'),
+    [expiringItems],
+  );
+
+  // Best recipe that uses at least one red-tier item. Derived from already-fetched
+  // recipes state — no extra API call.
+  const heroRecipe = useMemo(() => {
+    if (redItems.length === 0 || recipes.length === 0 || recipesLoading) return null;
+    const redNames = redItems.map(i => i.name.toLowerCase());
+    let best: Recipe | null = null;
+    let bestScore = -1;
+    for (const recipe of recipes) {
+      const score = recipe.matchedIngredients.filter(ing =>
+        redNames.some(
+          name => ing.toLowerCase().includes(name) || name.includes(ing.toLowerCase()),
+        ),
+      ).length;
+      if (score > bestScore) {
+        bestScore = score;
+        best = recipe;
+      }
+    }
+    return bestScore > 0 ? best : null;
+  }, [recipes, redItems, recipesLoading]);
+
+  // Stable string key so the effect only fires when the actual set of expiring
+  // items changes, not on every render (array reference would always differ).
+  const expiringNamesKey = useMemo(
+    () => [...expiringNames].sort().join(','),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [expiringNames.join(',')],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setRecipesLoading(true);
+    fetchRecipeSuggestions(expiringNames, 6).then((data) => {
+      if (!cancelled) {
+        setRecipes(data);
+        setRecipesLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+    // expiringNamesKey is the stable dep; expiringNames is the actual value passed
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expiringNamesKey]);
 
   const handleAddItem = useCallback(async (data: {
     name: string;
     category: FoodCategory;
     purchaseDate?: string;
     expiryDate: string;
+    storageZone: 'fridge' | 'freezer' | 'pantry';
+    opened: boolean;
   }) => {
     const newItem = await addPantryItem({ userId, ...data });
-    setItems(prev => [newItem as PantryItem, ...prev]);
+    const cast = newItem as PantryItem;
+    setItems(prev => [cast, ...prev]);
+    // If the new item falls within the 3-day alert window, add it to expiring list
+    if (getUrgency(cast.expiry_date).level !== 'green') {
+      setExpiringItems(prev =>
+        [cast, ...prev].sort(
+          (a, b) => new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime(),
+        ),
+      );
+    }
     toast.success(`${data.name} added to pantry! 🌿`, {
       style: { background: '#111', border: '1px solid rgba(13,148,136,0.4)', color: '#fff' }
     });
@@ -64,6 +130,7 @@ export default function SpoilerDashboard({
         const item = items.find(i => i.id === id);
         await markItemUsed(id, userId);
         setItems(prev => prev.filter(i => i.id !== id));
+        setExpiringItems(prev => prev.filter(i => i.id !== id));
         setSavings(prev => ({
           ...prev,
           totalSaved: prev.totalSaved + (item?.estimated_cost || 0),
@@ -89,6 +156,7 @@ export default function SpoilerDashboard({
         const item = items.find(i => i.id === id);
         await markItemWasted(id, userId);
         setItems(prev => prev.filter(i => i.id !== id));
+        setExpiringItems(prev => prev.filter(i => i.id !== id));
         setSavings(prev => ({
           ...prev,
           totalWasted: prev.totalWasted + 1,
@@ -117,8 +185,11 @@ export default function SpoilerDashboard({
               totalSaved={savings.totalSaved}
             />
 
-            {/* Expiry Alert Strip */}
+            {/* Expiry Alert Strip — items from server-side getExpiringItems(userId, 3) */}
             {expiringItems.length > 0 && <ExpiryAlertStrip items={expiringItems} />}
+
+            {/* Tonight's Hero — best recipe for red-tier items */}
+            {heroRecipe && <TonightsHeroCard recipe={heroRecipe} redItems={redItems} />}
 
             {/* Main content grid */}
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-6">
@@ -130,8 +201,12 @@ export default function SpoilerDashboard({
                   onWasted={handleWasted}
                   onAddItem={() => setShowAddModal(true)}
                 />
-                {expiringItems.length > 0 && (
-                  <RecipeSuggestionsPanel recipes={recipes} expiringItems={expiringNames} />
+                {(recipesLoading || expiringItems.length > 0) && (
+                  <RecipeSuggestionsPanel
+                    recipes={recipes}
+                    expiringItems={expiringNames}
+                    loading={recipesLoading}
+                  />
                 )}
               </div>
 
@@ -189,8 +264,12 @@ export default function SpoilerDashboard({
                   : 'Add items to your pantry to get personalized recipe suggestions'}
               </p>
             </div>
-            {expiringItems.length > 0 ? (
-              <RecipeSuggestionsPanel recipes={getMatchingRecipes(expiringNames, 6)} expiringItems={expiringNames} />
+            {(recipesLoading || expiringItems.length > 0) ? (
+              <RecipeSuggestionsPanel
+                recipes={recipes}
+                expiringItems={expiringNames}
+                loading={recipesLoading}
+              />
             ) : (
               <div className="flex flex-col items-center justify-center py-20 gap-4 bg-[#111111] border border-white/[0.08] border-dashed rounded-[10px]">
                 <span className="text-5xl">🍳</span>

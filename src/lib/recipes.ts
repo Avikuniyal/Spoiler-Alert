@@ -1,109 +1,122 @@
+// Server-side only. This module reads SPOONACULAR_API_KEY from environment.
+// Never import this file from a client component — use the server action in
+// src/app/recipe-actions.ts instead.
+
 import { Recipe } from '@/types/pantry';
 
-export const RECIPE_DATABASE: Recipe[] = [
-  {
-    id: '1',
-    title: 'Garden Vegetable Stir-Fry',
-    matchedIngredients: [],
-    allIngredients: ['broccoli', 'carrots', 'bell peppers', 'onion', 'garlic', 'soy sauce', 'sesame oil'],
-    steps: [
-      'Heat sesame oil in a large wok over high heat.',
-      'Add garlic and stir-fry for 30 seconds until fragrant.',
-      'Add harder vegetables (carrots, broccoli) first, cook 3 minutes.',
-      'Add softer vegetables (bell peppers, onion), cook 2 more minutes.',
-      'Drizzle soy sauce, toss to combine and serve hot.',
-    ],
-    imageUrl: 'https://images.unsplash.com/photo-1512058564366-18510be2db19?w=400&q=80',
-    cookTime: '15 min',
-  },
-  {
-    id: '2',
-    title: 'Creamy Dairy Pasta',
-    matchedIngredients: [],
-    allIngredients: ['pasta', 'milk', 'butter', 'parmesan', 'garlic', 'herbs', 'black pepper'],
-    steps: [
-      'Cook pasta according to package directions.',
-      'Melt butter in a pan, sauté garlic for 1 minute.',
-      'Add milk and bring to a gentle simmer.',
-      'Stir in parmesan until melted and creamy.',
-      'Toss with pasta, season with pepper and herbs.',
-    ],
-    imageUrl: 'https://images.unsplash.com/photo-1563379926898-05f4575a45d8?w=400&q=80',
-    cookTime: '20 min',
-  },
-  {
-    id: '3',
-    title: 'Savory Meat & Herb Skillet',
-    matchedIngredients: [],
-    allIngredients: ['ground beef', 'chicken', 'onion', 'garlic', 'rosemary', 'thyme', 'olive oil'],
-    steps: [
-      'Season meat generously with salt, pepper, and herbs.',
-      'Heat olive oil in a cast iron skillet over medium-high.',
-      'Sear meat on all sides until golden brown.',
-      'Add aromatics (onion, garlic) and cook 3 more minutes.',
-      'Rest 5 minutes before serving.',
-    ],
-    imageUrl: 'https://images.unsplash.com/photo-1604908176997-125f25cc6f3d?w=400&q=80',
-    cookTime: '25 min',
-  },
-  {
-    id: '4',
-    title: 'Pantry Staple Soup',
-    matchedIngredients: [],
-    allIngredients: ['canned tomatoes', 'beans', 'pasta', 'onion', 'garlic', 'vegetable broth', 'basil'],
-    steps: [
-      'Sauté onion and garlic in olive oil until soft.',
-      'Add canned tomatoes and vegetable broth, bring to boil.',
-      'Add beans and pasta, cook until pasta is tender.',
-      'Season with basil, salt, and pepper.',
-      'Serve with crusty bread.',
-    ],
-    imageUrl: 'https://images.unsplash.com/photo-1547592166-23ac45744acd?w=400&q=80',
-    cookTime: '30 min',
-  },
-  {
-    id: '5',
-    title: 'Fresh Fruit Smoothie Bowl',
-    matchedIngredients: [],
-    allIngredients: ['mixed berries', 'banana', 'yogurt', 'honey', 'granola', 'chia seeds'],
-    steps: [
-      'Blend frozen berries and banana with a splash of milk.',
-      'Pour thick smoothie into a bowl.',
-      'Top with fresh fruit, granola, and chia seeds.',
-      'Drizzle honey over the top.',
-      'Serve immediately for best texture.',
-    ],
-    imageUrl: 'https://images.unsplash.com/photo-1490474418585-ba9bad8fd0ea?w=400&q=80',
-    cookTime: '5 min',
-  },
-  {
-    id: '6',
-    title: 'Cheese & Veggie Frittata',
-    matchedIngredients: [],
-    allIngredients: ['eggs', 'cheese', 'spinach', 'tomatoes', 'onion', 'olive oil', 'herbs'],
-    steps: [
-      'Preheat oven to 375°F (190°C).',
-      'Sauté vegetables in an oven-safe skillet.',
-      'Whisk eggs with salt, pepper, and herbs.',
-      'Pour eggs over vegetables, sprinkle cheese on top.',
-      'Bake 15 minutes until set and golden.',
-    ],
-    imageUrl: 'https://images.unsplash.com/photo-1569581159046-b8d19d45cb39?w=400&q=80',
-    cookTime: '25 min',
-  },
-];
+const SPOONACULAR_BASE = 'https://api.spoonacular.com';
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-export function getMatchingRecipes(expiringItems: string[], count: number = 3): Recipe[] {
-  const itemNames = expiringItems.map(name => name.toLowerCase());
-  
-  const scored = RECIPE_DATABASE.map(recipe => {
-    const matched = recipe.allIngredients.filter(ing =>
-      itemNames.some(name => ing.toLowerCase().includes(name) || name.includes(ing.toLowerCase()))
-    );
-    return { ...recipe, matchedIngredients: matched, score: matched.length };
+interface CacheEntry {
+  data: Recipe[];
+  expiresAt: number;
+}
+
+// Module-level cache. Lives in the Node.js process for the lifetime of the
+// server instance. Empty on cold start / after a deploy. That is acceptable —
+// the worst case is one extra Spoonacular call after a restart.
+const recipeCache = new Map<string, CacheEntry>();
+
+// ── Spoonacular response shapes ───────────────────────────────────────────────
+
+interface SpoonacularIngredient {
+  id: number;
+  name: string;
+  amount: number;
+  unit: string;
+  image: string;
+}
+
+interface SpoonacularRecipe {
+  id: number;
+  title: string;
+  image: string;
+  usedIngredientCount: number;
+  missedIngredientCount: number;
+  usedIngredients: SpoonacularIngredient[];
+  missedIngredients: SpoonacularIngredient[];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function buildCacheKey(ingredients: string[]): string {
+  return [...ingredients].sort().join(',').toLowerCase();
+}
+
+function mapToRecipe(raw: SpoonacularRecipe): Recipe {
+  const usedNames = raw.usedIngredients.map((i) => i.name);
+  const allNames = [...raw.usedIngredients, ...raw.missedIngredients].map((i) => i.name);
+  // Spoonacular recipe page URL format is well-known and stable.
+  const slug = raw.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+
+  return {
+    id: String(raw.id),
+    title: raw.title,
+    imageUrl: raw.image,
+    matchedIngredients: usedNames,
+    allIngredients: allNames,
+    steps: [], // findByIngredients does not return steps — see sourceUrl
+    cookTime: '—',
+    sourceUrl: `https://spoonacular.com/recipes/${slug}-${raw.id}`,
+  };
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch recipe suggestions from Spoonacular's findByIngredients endpoint.
+ *
+ * Results are cached in memory for 1 hour keyed by sorted ingredient names.
+ * Returns an empty array if:
+ *   - ingredients is empty
+ *   - SPOONACULAR_API_KEY is missing
+ *   - the API call fails for any reason
+ *
+ * This function must only be called server-side.
+ */
+export async function getRecipeSuggestions(
+  ingredients: string[],
+  count: number = 6,
+): Promise<Recipe[]> {
+  if (ingredients.length === 0) return [];
+
+  const apiKey = process.env.SPOONACULAR_API_KEY;
+  if (!apiKey) {
+    console.warn('[recipes] SPOONACULAR_API_KEY is not set — recipe suggestions disabled');
+    return [];
+  }
+
+  const key = buildCacheKey(ingredients);
+  const cached = recipeCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.data;
+  }
+
+  const params = new URLSearchParams({
+    apiKey,
+    ingredients: ingredients.join(',+'),
+    number: String(count),
+    ranking: '1',          // 1 = maximize used ingredients, 2 = minimize missing
+    ignorePantry: 'false',
   });
-  
-  scored.sort((a, b) => b.score - a.score);
-  
-  return scored.slice(0, count);
+
+  try {
+    const res = await fetch(
+      `${SPOONACULAR_BASE}/recipes/findByIngredients?${params}`,
+      { cache: 'no-store' }, // we manage our own caching
+    );
+
+    if (!res.ok) {
+      console.error(`[recipes] Spoonacular error: ${res.status} ${res.statusText}`);
+      return [];
+    }
+
+    const json: SpoonacularRecipe[] = await res.json();
+    const data = json.map(mapToRecipe);
+    recipeCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
+    return data;
+  } catch (err) {
+    console.error('[recipes] Failed to fetch from Spoonacular:', err);
+    return [];
+  }
 }

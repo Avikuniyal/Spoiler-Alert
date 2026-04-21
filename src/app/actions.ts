@@ -167,14 +167,18 @@ export const checkoutSessionAction = async ({
   customerEmail?: string;
   metadata?: Record<string, string>;
 }) => {
-  const result = await api.checkouts.create({
-    productPriceId,
-    successUrl,
-    customerEmail,
-    metadata,
-  });
-
-  return result;
+  try {
+    const result = await api.checkouts.create({
+      productPriceId,
+      successUrl,
+      customerEmail,
+      metadata,
+    });
+    return result;
+  } catch (error) {
+    console.error('Error creating Polar checkout session:', error);
+    return { error: 'Failed to create checkout session' };
+  }
 }
 
 export const checkUserSubscription = async (userId: string) => {

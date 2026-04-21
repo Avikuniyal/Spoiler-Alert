@@ -19,6 +19,8 @@ export interface PantryItem {
   expiry_date: string;
   status: PantryItemStatus;
   estimated_cost: number;
+  storage_zone: 'fridge' | 'freezer' | 'pantry' | null;
+  opened: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -42,10 +44,15 @@ export interface Recipe {
   steps: string[];
   imageUrl: string;
   cookTime: string;
+  sourceUrl?: string; // link to full recipe on Spoonacular
 }
 
 export interface UrgencyLevel {
-  level: 'green' | 'amber' | 'red';
+  // expired: past expiry date — distinct from red (shown differently in UI)
+  // red:     expires today or tomorrow (0–1 days)
+  // amber:   expires in 2–3 days
+  // green:   expires in 4+ days
+  level: 'green' | 'amber' | 'red' | 'expired';
   daysLeft: number;
   label: string;
 }
@@ -57,11 +64,13 @@ export function getUrgency(expiryDate: string): UrgencyLevel {
   expiry.setHours(0, 0, 0, 0);
   const diffMs = expiry.getTime() - today.getTime();
   const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  
-  if (daysLeft <= 0) {
-    return { level: 'red', daysLeft, label: daysLeft === 0 ? 'Expires today' : 'Expired' };
+
+  if (daysLeft < 0) {
+    return { level: 'expired', daysLeft, label: 'Expired' };
+  } else if (daysLeft <= 1) {
+    return { level: 'red', daysLeft, label: daysLeft === 0 ? 'Expires today' : 'Expires tomorrow' };
   } else if (daysLeft <= 3) {
-    return { level: 'amber', daysLeft, label: `${daysLeft} day${daysLeft === 1 ? '' : 's'} left` };
+    return { level: 'amber', daysLeft, label: `${daysLeft} days left` };
   } else {
     return { level: 'green', daysLeft, label: `${daysLeft} days left` };
   }

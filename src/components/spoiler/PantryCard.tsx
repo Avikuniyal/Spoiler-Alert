@@ -18,25 +18,22 @@ export default function PantryCard({ item, onUsed, onWasted, style }: PantryCard
   const icon = CATEGORY_ICONS[item.category as keyof typeof CATEGORY_ICONS] || '🥡';
 
   const borderAccent =
-    urgency.level === 'red'
-      ? 'border-l-red-500'
-      : urgency.level === 'amber'
-      ? 'border-l-amber-500'
-      : 'border-l-[#0D9488]';
+    urgency.level === 'expired' ? 'border-l-red-900'
+    : urgency.level === 'red'     ? 'border-l-red-500'
+    : urgency.level === 'amber'   ? 'border-l-amber-500'
+    :                               'border-l-[#0D9488]';
 
   const badgeBg =
-    urgency.level === 'red'
-      ? 'bg-red-500/15 text-red-400 border-red-500/40'
-      : urgency.level === 'amber'
-      ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
-      : 'bg-[#0D9488]/15 text-[#0D9488] border-[#0D9488]/40';
+    urgency.level === 'expired' ? 'bg-red-950/40 text-red-300/60 border-red-900/40'
+    : urgency.level === 'red'     ? 'bg-red-500/15 text-red-400 border-red-500/40'
+    : urgency.level === 'amber'   ? 'bg-amber-500/15 text-amber-400 border-amber-500/40'
+    :                               'bg-[#0D9488]/15 text-[#0D9488] border-[#0D9488]/40';
 
   const dotColor =
-    urgency.level === 'red'
-      ? 'bg-red-400'
-      : urgency.level === 'amber'
-      ? 'bg-amber-400'
-      : 'bg-[#0D9488]';
+    urgency.level === 'expired' ? 'bg-red-800'
+    : urgency.level === 'red'     ? 'bg-red-400'
+    : urgency.level === 'amber'   ? 'bg-amber-400'
+    :                               'bg-[#0D9488]';
 
   const handleAction = (action: 'used' | 'wasted') => {
     setExitAction(action);
@@ -64,7 +61,7 @@ export default function PantryCard({ item, onUsed, onWasted, style }: PantryCard
         </div>
         <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border text-xs font-crimson ${badgeBg}`}>
           {urgency.level !== 'green' && (
-            <span className={`w-1.5 h-1.5 rounded-full ${dotColor} pulse-dot flex-shrink-0`} />
+            <span className={`w-1.5 h-1.5 rounded-full ${dotColor} flex-shrink-0 ${urgency.level !== 'expired' ? 'pulse-dot' : ''}`} />
           )}
           {urgency.label}
         </div>

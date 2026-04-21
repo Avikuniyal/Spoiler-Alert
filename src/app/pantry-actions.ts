@@ -23,10 +23,12 @@ export async function addPantryItem(formData: {
   category: FoodCategory;
   purchaseDate?: string;
   expiryDate: string;
+  storageZone?: 'fridge' | 'freezer' | 'pantry';
+  opened?: boolean;
 }) {
   const supabase = await createClient();
   const estimatedCost = CATEGORY_COSTS[formData.category] || 4.0;
-  
+
   const { data, error } = await supabase
     .from('pantry_items')
     .insert({
@@ -37,10 +39,12 @@ export async function addPantryItem(formData: {
       expiry_date: formData.expiryDate,
       status: 'active',
       estimated_cost: estimatedCost,
+      storage_zone: formData.storageZone ?? null,
+      opened: formData.opened ?? false,
     })
     .select()
     .single();
-  
+
   if (error) throw error;
   revalidatePath('/dashboard');
   return data;
@@ -112,6 +116,25 @@ export async function markItemWasted(itemId: string, userId: string) {
   if (logError) throw logError;
   revalidatePath('/dashboard');
   return item;
+}
+
+export async function getExpiringItems(userId: string, daysAhead: number) {
+  const supabase = await createClient();
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() + daysAhead);
+  const cutoffStr = cutoff.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  const { data, error } = await supabase
+    .from('pantry_items')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .lte('expiry_date', cutoffStr) // includes already-expired items (no lower bound)
+    .order('expiry_date', { ascending: true });
+
+  if (error) throw error;
+  return data;
 }
 
 export async function getSavingsStats(userId: string) {
