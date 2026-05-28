@@ -72,6 +72,12 @@ export default function TonightsHeroCard({ recipe, redItems }: TonightsHeroCardP
             </div>
           )}
 
+          {recipe.missedIngredientCount > 0 && (
+            <p className="font-crimson text-xs text-amber-400/60">
+              Needs {recipe.missedIngredientCount} more ingredient{recipe.missedIngredientCount !== 1 ? 's' : ''} not in your pantry
+            </p>
+          )}
+
           <button
             onClick={() => setExpanded(e => !e)}
             className="self-start flex items-center gap-1.5 px-3 py-1.5 rounded-[7px] bg-red-500/10 border border-red-500/25 text-red-400 font-crimson text-sm hover:bg-red-500/20 transition-all duration-200"

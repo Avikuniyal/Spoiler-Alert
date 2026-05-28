@@ -2,9 +2,10 @@
 // Never import this file from a client component — use the server action in
 // src/app/recipe-actions.ts instead.
 
-import { Recipe, RecipeDetail } from '@/types/pantry';
+import { Recipe, RecipeDetail } from "@/types/pantry";
 
-const SPOONACULAR_BASE = 'https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com';
+const SPOONACULAR_BASE =
+  "https://spoonacular-recipe-food-nutrition-v1.p.rapidapi.com";
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 interface CacheEntry {
@@ -56,18 +57,31 @@ interface SpoonacularRecipe {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ').trim();
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .trim();
 }
 
 function buildCacheKey(ingredients: string[]): string {
-  return [...ingredients].sort().join(',').toLowerCase();
+  return [...ingredients].sort().join(",").toLowerCase();
 }
 
 function mapToRecipe(raw: SpoonacularRecipe): Recipe {
   const usedNames = raw.usedIngredients.map((i) => i.name);
-  const allNames = [...raw.usedIngredients, ...raw.missedIngredients].map((i) => i.name);
+  const allNames = [...raw.usedIngredients, ...raw.missedIngredients].map(
+    (i) => i.name,
+  );
   // Spoonacular recipe page URL format is well-known and stable.
-  const slug = raw.title.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+  const slug = raw.title
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
 
   return {
     id: String(raw.id),
@@ -75,8 +89,9 @@ function mapToRecipe(raw: SpoonacularRecipe): Recipe {
     imageUrl: raw.image,
     matchedIngredients: usedNames,
     allIngredients: allNames,
+    missedIngredientCount: raw.missedIngredientCount,
     steps: [], // findByIngredients does not return steps — see sourceUrl
-    cookTime: '—',
+    cookTime: "—",
     sourceUrl: `https://spoonacular.com/recipes/${slug}-${raw.id}`,
   };
 }
@@ -102,7 +117,9 @@ export async function getRecipeSuggestions(
 
   const apiKey = process.env.SPOONACULAR_API_KEY;
   if (!apiKey) {
-    console.warn('[recipes] SPOONACULAR_API_KEY is not set — recipe suggestions disabled');
+    console.warn(
+      "[recipes] SPOONACULAR_API_KEY is not set — recipe suggestions disabled",
+    );
     return [];
   }
 
@@ -113,26 +130,29 @@ export async function getRecipeSuggestions(
   }
 
   const params = new URLSearchParams({
-    ingredients: ingredients.join(',+'),
+    ingredients: ingredients.join(",+"),
     number: String(count),
-    ranking: '1',          // 1 = maximize used ingredients, 2 = minimize missing
-    ignorePantry: 'false',
+    ranking: "1", // 1 = maximize used ingredients, 2 = minimize missing
+    ignorePantry: "true",
   });
 
   try {
     const res = await fetch(
       `${SPOONACULAR_BASE}/recipes/findByIngredients?${params}`,
       {
-        cache: 'no-store', // we manage our own caching
+        cache: "no-store", // we manage our own caching
         headers: {
-          'X-RapidAPI-Key': apiKey,
-          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com',
+          "X-RapidAPI-Key": apiKey,
+          "X-RapidAPI-Host":
+            "spoonacular-recipe-food-nutrition-v1.p.rapidapi.com",
         },
       },
     );
 
     if (!res.ok) {
-      console.error(`[recipes] Spoonacular error: ${res.status} ${res.statusText}`);
+      console.error(
+        `[recipes] Spoonacular error: ${res.status} ${res.statusText}`,
+      );
       return [];
     }
 
@@ -141,12 +161,14 @@ export async function getRecipeSuggestions(
     recipeCache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS });
     return data;
   } catch (err) {
-    console.error('[recipes] Failed to fetch from Spoonacular:', err);
+    console.error("[recipes] Failed to fetch from Spoonacular:", err);
     return [];
   }
 }
 
-export async function getRecipeDetails(recipeId: string): Promise<RecipeDetail | null> {
+export async function getRecipeDetails(
+  recipeId: string,
+): Promise<RecipeDetail | null> {
   const apiKey = process.env.SPOONACULAR_API_KEY;
   if (!apiKey) return null;
 
@@ -157,16 +179,19 @@ export async function getRecipeDetails(recipeId: string): Promise<RecipeDetail |
     const res = await fetch(
       `${SPOONACULAR_BASE}/recipes/${recipeId}/information`,
       {
-        cache: 'no-store',
+        cache: "no-store",
         headers: {
-          'X-RapidAPI-Key': apiKey,
-          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com',
+          "X-RapidAPI-Key": apiKey,
+          "X-RapidAPI-Host":
+            "spoonacular-recipe-food-nutrition-v1.p.rapidapi.com",
         },
       },
     );
 
     if (!res.ok) {
-      console.error(`[recipes] /information error for ${recipeId}: ${res.status}`);
+      console.error(
+        `[recipes] /information error for ${recipeId}: ${res.status}`,
+      );
       return null;
     }
 
@@ -174,16 +199,19 @@ export async function getRecipeDetails(recipeId: string): Promise<RecipeDetail |
     const detail: RecipeDetail = {
       cookTime: json.readyInMinutes ?? 0,
       servings: json.servings ?? 0,
-      steps: json.analyzedInstructions?.[0]?.steps?.map(s => s.step) ?? [],
-      ingredients: json.extendedIngredients?.map(i => i.original) ?? [],
-      summary: json.summary ? stripHtml(json.summary) : '',
+      steps: json.analyzedInstructions?.[0]?.steps?.map((s) => s.step) ?? [],
+      ingredients: json.extendedIngredients?.map((i) => i.original) ?? [],
+      summary: json.summary ? stripHtml(json.summary) : "",
       diets: json.diets ?? [],
     };
 
-    recipeDetailCache.set(recipeId, { data: detail, expiresAt: Date.now() + CACHE_TTL_MS });
+    recipeDetailCache.set(recipeId, {
+      data: detail,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
     return detail;
   } catch (err) {
-    console.error('[recipes] Failed to fetch recipe details:', err);
+    console.error("[recipes] Failed to fetch recipe details:", err);
     return null;
   }
 }

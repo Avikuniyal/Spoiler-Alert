@@ -1,9 +1,9 @@
-'use client';
+"use client";
 
-import { Recipe, RecipeDetail } from '@/types/pantry';
-import { useState } from 'react';
-import { Clock, ChevronDown, ChevronUp, Utensils } from 'lucide-react';
-import { fetchRecipeDetails } from '@/app/recipe-actions';
+import { Recipe, RecipeDetail } from "@/types/pantry";
+import { useState } from "react";
+import { Clock, ChevronDown, ChevronUp, Utensils } from "lucide-react";
+import { fetchRecipeDetails } from "@/app/recipe-actions";
 
 interface RecipeSuggestionsPanelProps {
   recipes: Recipe[];
@@ -62,7 +62,9 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
         {detail && detail.cookTime > 0 && (
           <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-1 bg-black/60 rounded-full">
             <Clock size={10} className="text-white/60" />
-            <span className="font-crimson text-xs text-white/60">{detail.cookTime} min</span>
+            <span className="font-crimson text-xs text-white/60">
+              {detail.cookTime} min
+            </span>
           </div>
         )}
       </div>
@@ -76,7 +78,7 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
         {/* Matched ingredients */}
         {recipe.matchedIngredients.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {recipe.matchedIngredients.map(ing => (
+            {recipe.matchedIngredients.map((ing) => (
               <span
                 key={ing}
                 className="px-2 py-0.5 bg-[#0D9488]/15 border border-[#0D9488]/30 rounded-full text-xs font-crimson text-[#0D9488]"
@@ -85,6 +87,13 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
               </span>
             ))}
           </div>
+        )}
+
+        {/* Missing-ingredient badge */}
+        {recipe.missedIngredientCount > 0 && (
+          <span className="self-start px-2 py-0.5 bg-amber-500/10 border border-amber-500/25 rounded-full text-xs font-crimson text-amber-400">
+            +{recipe.missedIngredientCount} more needed
+          </span>
         )}
 
         {/* Expanded section */}
@@ -109,7 +118,7 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
                 </p>
                 <ul className="flex flex-col gap-1">
                   {ingredients.map((ing, idx) => {
-                    const isMatched = recipe.matchedIngredients.some(m =>
+                    const isMatched = recipe.matchedIngredients.some((m) =>
                       ing.toLowerCase().includes(m.toLowerCase()),
                     );
                     return (
@@ -118,7 +127,9 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
                         className="font-crimson text-sm text-white/70 flex items-center gap-1.5"
                       >
                         <span className="w-1 h-1 rounded-full bg-[#0D9488]/60 flex-shrink-0" />
-                        <span className={isMatched ? 'text-[#0D9488]' : ''}>{ing}</span>
+                        <span className={isMatched ? "text-[#0D9488]" : ""}>
+                          {ing}
+                        </span>
                       </li>
                     );
                   })}
@@ -126,23 +137,29 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
               </div>
             )}
 
-            {!detailLoading && !detailFailed && detail && detail.steps.length > 0 && (
-              <div>
-                <p className="font-crimson text-xs text-white/40 uppercase tracking-wider mb-2">
-                  Steps
-                </p>
-                <ol className="flex flex-col gap-2">
-                  {detail.steps.map((step, idx) => (
-                    <li key={idx} className="font-crimson text-sm text-white/70 flex gap-2">
-                      <span className="font-playfair text-[#0D9488] font-bold flex-shrink-0 text-xs mt-0.5">
-                        {idx + 1}.
-                      </span>
-                      {step}
-                    </li>
-                  ))}
-                </ol>
-              </div>
-            )}
+            {!detailLoading &&
+              !detailFailed &&
+              detail &&
+              detail.steps.length > 0 && (
+                <div>
+                  <p className="font-crimson text-xs text-white/40 uppercase tracking-wider mb-2">
+                    Steps
+                  </p>
+                  <ol className="flex flex-col gap-2">
+                    {detail.steps.map((step, idx) => (
+                      <li
+                        key={idx}
+                        className="font-crimson text-sm text-white/70 flex gap-2"
+                      >
+                        <span className="font-playfair text-[#0D9488] font-bold flex-shrink-0 text-xs mt-0.5">
+                          {idx + 1}.
+                        </span>
+                        {step}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
           </div>
         )}
 
@@ -171,14 +188,30 @@ export default function RecipeSuggestionsPanel({
   recipes,
   loading = false,
 }: RecipeSuggestionsPanelProps) {
-  if (!loading && recipes.length === 0) return null;
+  if (!loading && recipes.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3 bg-[#111111] border border-white/[0.08] border-dashed rounded-[10px]">
+        <span className="text-4xl">🔍</span>
+        <div className="text-center max-w-sm">
+          <p className="font-playfair text-white/60 text-lg">
+            No recipe suggestions found
+          </p>
+          <p className="font-crimson text-white/30 text-sm mt-1">
+            Try adding more items to your pantry for personalized recipe ideas.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-playfair text-xl font-bold text-white">Recipe Suggestions</h2>
+        <h2 className="font-playfair text-xl font-bold text-white">
+          Recipe Suggestions
+        </h2>
         <span className="font-crimson text-sm text-white/40">
-          {loading ? 'Finding recipes…' : 'Based on your pantry'}
+          {loading ? "Finding recipes…" : "Based on your pantry"}
         </span>
       </div>
 
