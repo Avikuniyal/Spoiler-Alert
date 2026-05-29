@@ -51,6 +51,11 @@ export default function SpoilerDashboard({
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [recipesLoading, setRecipesLoading] = useState(true);
 
+  // Hero-specific recipe results — only populated when main results lack a red-item match.
+  // Avoids an extra API call in the common case where the main call already covers it.
+  const [heroRecipes, setHeroRecipes] = useState<Recipe[]>([]);
+  const [heroRecipesLoading, setHeroRecipesLoading] = useState(false);
+
   // Sourced from server-side getExpiringItems(userId, 3) on initial load.
   // Updated client-side when items are marked used/wasted or added.
   const [expiringItems, setExpiringItems] =
@@ -63,7 +68,15 @@ export default function SpoilerDashboard({
       expiringItems.filter((i) => getUrgency(i.expiry_date).level === "red"),
     [expiringItems],
   );
-  const redNames = useMemo(() => redItems.map((i) => i.name.toLowerCase()), [redItems]);
+  const redNames = useMemo(
+    () => redItems.map((i) => i.name.toLowerCase()),
+    [redItems],
+  );
+  const redItemNames = useMemo(() => redItems.map((i) => i.name), [redItems]);
+  const redItemNamesKey = useMemo(
+    () => [...redItemNames].sort().join(","),
+    [redItemNames],
+  );
 
   // Heuristic score per recipe: strongly favors using expiring red-tier items,
   // rewards using more of what you have, and penalizes missing ingredients.
@@ -87,22 +100,71 @@ export default function SpoilerDashboard({
       .sort((a, b) => b.score - a.score);
   }, [recipes, redNames]);
 
-  // Tonight's Hero: the highest-scored recipe that uses at least one red-tier item.
-  // If none qualify, fall back to the top-scored recipe overall.
+  // Tonight's Hero: uses heroRecipes (red-item-specific API results) when populated,
+  // otherwise falls back to the main recipes pool. Only the first load of a session
+  // with no red match in the main results triggers the extra API call.
   const heroRecipe = useMemo(() => {
-    if (scoredRecipes.length === 0 || recipesLoading) return null;
-    const hero = scoredRecipes.find((s) => {
-      const redMatchCount = s.recipe.matchedIngredients.filter((ing) =>
+    const pool = heroRecipes.length > 0 ? heroRecipes : recipes;
+    if (pool.length === 0 || recipesLoading || heroRecipesLoading) return null;
+
+    const scored = pool
+      .map((r) => {
+        const redMatchCount = r.matchedIngredients.filter((ing) =>
+          redNames.some(
+            (name) =>
+              ing.toLowerCase().includes(name) ||
+              name.includes(ing.toLowerCase()),
+          ),
+        ).length;
+        const score =
+          redMatchCount * 10 +
+          r.matchedIngredients.length * 2 -
+          r.missedIngredientCount * 5;
+        return { recipe: r, score, redMatchCount };
+      })
+      .filter((s) => s.redMatchCount > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return scored[0]?.recipe ?? null;
+  }, [recipes, heroRecipes, recipesLoading, heroRecipesLoading, redNames]);
+
+  // Lazy hero fallback: after the main recipes load, check if any recipe's
+  // matchedIngredients overlaps with the user's red-tier items. If not, make a
+  // dedicated Spoonacular call with just the red item names. This avoids an
+  // extra API call in the common case where the main results already cover it.
+  useEffect(() => {
+    if (recipesLoading) return;
+
+    const hasRedMatch = recipes.some((r) =>
+      r.matchedIngredients.some((ing) =>
         redNames.some(
           (name) =>
             ing.toLowerCase().includes(name) ||
             name.includes(ing.toLowerCase()),
         ),
-      ).length;
-      return redMatchCount > 0;
+      ),
+    );
+
+    if (hasRedMatch) {
+      setHeroRecipes([]);
+      return;
+    }
+
+    if (redItemNames.length === 0) return;
+
+    let cancelled = false;
+    setHeroRecipesLoading(true);
+    fetchRecipeSuggestions(redItemNames, 6).then((data) => {
+      if (!cancelled) {
+        setHeroRecipes(data);
+        setHeroRecipesLoading(false);
+      }
     });
-    return hero?.recipe ?? null;
-  }, [scoredRecipes, redNames, recipesLoading]);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipes, recipesLoading, redItemNamesKey]);
 
   // All item names for recipe matching: expiring first, then the rest.
   const allItemNames = useMemo(() => {
