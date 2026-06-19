@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt to TXT Converter</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; max-width: 600px; }
+        .container { border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+        .status { margin-top: 15px; color: #555; font-weight: bold; }
+        button { background-color: #007BFF; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; }
+        button:disabled { background-color: #aaa; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Receipt Item Extractor</h2>
+    <p>Upload a receipt image to extract items directly into a .txt file.</p>
+    
+    <input type="file" id="receiptInput" accept="image/*">
+    <button id="processBtn">Convert to TXT</button>
+    
+    <div id="statusMessage" class="status"></div>
+</div>
+
+<script>
+    document.getElementById('processBtn').addEventListener('click', async () => {
+        const fileInput = document.getElementById('receiptInput');
+        const statusMessage = document.getElementById('statusMessage');
+        const processBtn = document.getElementById('processBtn');
+
+        // Validation: Ensure a file was selected
+        if (fileInput.files.length === 0) {
+            alert('Please select a receipt image first.');
+            return;
+        }
+
+        const imageFile = fileInput.files[0];
+        
+        // UI Update: Disable button and show loading state
+        processBtn.disabled = true;
+        statusMessage.innerText = "Initializing OCR Engine (Downloading language packs)...";
+
+        try {
+            // 2. Run OCR directly in the browser
+            const result = await Tesseract.recognize(
+                imageFile,
+                'eng',
+                { 
+                    logger: m => {
+                        // Show progress percentage in real-time
+                        if (m.status === 'recognizing') {
+                            statusMessage.innerText = `Processing: ${Math.round(m.progress * 100)}%`;
+                        }
+                    }
+                }
+            );
+
+            const rawText = result.data.text;
+            statusMessage.innerText = "Cleaning up data...";
+
+            // 3. Parse and filter the text
+            const lines = rawText.split('\n');
+            const cleanedItems = [];
+
+            lines.forEach(line => {
+                const trimmed = line.trim();
+                // Simple rule: Ignore empty lines and lines shorter than 4 characters
+                if (trimmed && trimmed.length > 3) {
+                    cleanedItems.push(trimmed);
+                }
+            });
+
+            // Combine cleaned items back into a single string with newlines
+            const finalTxtContent = cleanedItems.join('\n');
+
+            // 4. Create a Blob (Binary Large Object) for the .txt file
+            const blob = new Blob([finalTxtContent], { type: 'text/plain' });
+            
+            // 5. Trigger an automatic browser download
+            const downloadLink = document.createElement('a');
+            downloadLink.href = URL.createObjectURL(blob);
+            downloadLink.download = 'receipt_items.txt';
+            
+            document.body.appendChild(downloadLink);
+            downloadLink.click(); // Programmatically click the link to start download
+            document.body.removeChild(downloadLink); // Clean up
+
+            statusMessage.innerText = "Success! File downloaded.";
+
+        } catch (error) {
+            console.error(error);
+            statusMessage.innerText = "An error occurred during text extraction.";
+        } finally {
+            // Re-enable the button
+            processBtn.disabled = false;
+        }
+    });
+</script>
+
+</body>
+</html>
