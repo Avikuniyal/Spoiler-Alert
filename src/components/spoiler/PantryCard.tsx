@@ -9,9 +9,10 @@ interface PantryCardProps {
   onUsed: (id: string) => void;
   onWasted: (id: string) => void;
   style?: React.CSSProperties;
+  compact?: boolean;
 }
 
-export default function PantryCard({ item, onUsed, onWasted, style }: PantryCardProps) {
+export default function PantryCard({ item, onUsed, onWasted, style, compact = false }: PantryCardProps) {
   const [isExiting, setIsExiting] = useState(false);
   const [exitAction, setExitAction] = useState<'used' | 'wasted' | null>(null);
   const urgency = getUrgency(item.expiry_date);
@@ -47,19 +48,19 @@ export default function PantryCard({ item, onUsed, onWasted, style }: PantryCard
   return (
     <div
       style={style}
-      className={`relative bg-[#111111] border border-white/[0.08] border-l-2 ${borderAccent} rounded-[10px] shadow-[2px_2px_0_rgba(0,0,0,0.1)] p-4 flex flex-col gap-3 transition-all duration-200 hover:border-white/[0.15] group ${
-        isExiting ? 'card-exit' : 'card-enter'
-      }`}
+      className={`relative bg-[#111111] border border-white/[0.08] border-l-2 ${borderAccent} rounded-[10px] shadow-[2px_2px_0_rgba(0,0,0,0.1)] flex flex-col transition-all duration-200 hover:border-white/[0.15] group ${
+        compact ? 'p-3 gap-2' : 'p-4 gap-3'
+      } ${isExiting ? 'card-exit' : 'card-enter'}`}
     >
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2.5">
-          <span className="text-2xl">{icon}</span>
-          <div>
-            <h3 className="font-playfair text-white font-semibold text-base leading-tight">{item.name}</h3>
-            <span className="font-crimson text-xs text-white/50">{item.category}</span>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={compact ? 'text-lg flex-shrink-0' : 'text-2xl flex-shrink-0'}>{icon}</span>
+          <div className="min-w-0">
+            <h3 className={`font-playfair text-white font-semibold leading-tight truncate ${compact ? 'text-sm' : 'text-base'}`}>{item.name}</h3>
+            {!compact && <span className="font-crimson text-xs text-white/50">{item.category}</span>}
           </div>
         </div>
-        <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full border text-xs font-crimson ${badgeBg}`}>
+        <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full border font-crimson flex-shrink-0 ${compact ? 'text-[10px]' : 'text-xs'} ${badgeBg}`}>
           {urgency.level !== 'green' && (
             <span className={`w-1.5 h-1.5 rounded-full ${dotColor} flex-shrink-0 ${urgency.level !== 'expired' ? 'pulse-dot' : ''}`} />
           )}
@@ -67,25 +68,25 @@ export default function PantryCard({ item, onUsed, onWasted, style }: PantryCard
         </div>
       </div>
 
-      {item.purchase_date && (
+      {!compact && item.purchase_date && (
         <div className="text-xs font-crimson text-white/40">
           Purchased: {new Date(item.purchase_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
         </div>
       )}
 
-      <div className="flex gap-2 pt-1">
+      <div className={`flex gap-1.5 ${compact ? '' : 'pt-1'}`}>
         <button
           onClick={() => handleAction('used')}
-          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[7px] border border-[#0D9488]/40 text-[#0D9488] text-sm font-crimson hover:bg-[#0D9488]/15 transition-all duration-200 hover:scale-[1.02]"
+          className={`flex-1 flex items-center justify-center gap-1 rounded-[7px] border border-[#0D9488]/40 text-[#0D9488] font-crimson hover:bg-[#0D9488]/15 transition-all duration-200 hover:scale-[1.02] ${compact ? 'py-1 text-xs' : 'py-1.5 text-sm'}`}
         >
-          <Check size={13} />
+          <Check size={compact ? 11 : 13} />
           Used
         </button>
         <button
           onClick={() => handleAction('wasted')}
-          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-[7px] border border-white/10 text-white/40 text-sm font-crimson hover:border-red-500/40 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 hover:scale-[1.02]"
+          className={`flex-1 flex items-center justify-center gap-1 rounded-[7px] border border-white/10 text-white/40 font-crimson hover:border-red-500/40 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200 hover:scale-[1.02] ${compact ? 'py-1 text-xs' : 'py-1.5 text-sm'}`}
         >
-          <X size={13} />
+          <X size={compact ? 11 : 13} />
           Wasted
         </button>
       </div>

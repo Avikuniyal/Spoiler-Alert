@@ -16,9 +16,12 @@ interface PantryGridProps {
   onUsed: (id: string) => void;
   onWasted: (id: string) => void;
   onAddItem: () => void;
+  compact?: boolean;
+  maxItems?: number;
+  onViewAll?: () => void;
 }
 
-export default function PantryGrid({ items, onUsed, onWasted, onAddItem }: PantryGridProps) {
+export default function PantryGrid({ items, onUsed, onWasted, onAddItem, compact = false, maxItems, onViewAll }: PantryGridProps) {
   const [activeCategory, setActiveCategory] = useState<FoodCategory | 'All'>('All');
   const [sortBy, setSortBy] = useState<SortOption>('expiry');
 
@@ -36,21 +39,26 @@ export default function PantryGrid({ items, onUsed, onWasted, onAddItem }: Pantr
     }
   });
 
+  const displayed = maxItems ? sorted.slice(0, maxItems) : sorted;
+  const hiddenCount = maxItems ? Math.max(0, sorted.length - maxItems) : 0;
+
   return (
     <div className="flex flex-col gap-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h2 className="font-playfair text-xl font-bold text-white">Pantry Inventory</h2>
         <div className="flex items-center gap-3">
-          <select
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value as SortOption)}
-            className="bg-[#111111] border border-white/10 rounded-[7px] px-3 py-1.5 text-sm font-crimson text-white/70 outline-none focus:border-[#0D9488]/60 transition-all duration-200 [color-scheme:dark]"
-          >
-            <option value="expiry">Sort: Expiry</option>
-            <option value="name">Sort: Name</option>
-            <option value="category">Sort: Category</option>
-          </select>
+          {!compact && (
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as SortOption)}
+              className="bg-[#111111] border border-white/10 rounded-[7px] px-3 py-1.5 text-sm font-crimson text-white/70 outline-none focus:border-[#0D9488]/60 transition-all duration-200 [color-scheme:dark]"
+            >
+              <option value="expiry">Sort: Expiry</option>
+              <option value="name">Sort: Name</option>
+              <option value="category">Sort: Category</option>
+            </select>
+          )}
           <button
             onClick={onAddItem}
             className="flex items-center gap-2 px-4 py-2 bg-[#0D9488] text-white rounded-[10px] font-crimson text-sm font-medium hover:scale-[1.02] hover:shadow-[0_0_20px_rgba(13,148,136,0.3)] transition-all duration-200"
@@ -61,35 +69,37 @@ export default function PantryGrid({ items, onUsed, onWasted, onAddItem }: Pantr
         </div>
       </div>
 
-      {/* Category filters */}
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setActiveCategory('All')}
-          className={`px-3 py-1.5 rounded-full text-sm font-crimson border transition-all duration-200 ${
-            activeCategory === 'All'
-              ? 'bg-[#0D9488]/20 border-[#0D9488]/60 text-[#0D9488]'
-              : 'bg-transparent border-white/10 text-white/50 hover:border-white/20'
-          }`}
-        >
-          All ({items.length})
-        </button>
-        {CATEGORIES.filter(cat => items.some(i => i.category === cat)).map(cat => {
-          const count = items.filter(i => i.category === cat).length;
-          return (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`px-3 py-1.5 rounded-full text-sm font-crimson border transition-all duration-200 ${
-                activeCategory === cat
-                  ? 'bg-[#0D9488]/20 border-[#0D9488]/60 text-[#0D9488]'
-                  : 'bg-transparent border-white/10 text-white/50 hover:border-white/20'
-              }`}
-            >
-              {cat} ({count})
-            </button>
-          );
-        })}
-      </div>
+      {/* Category filters — hidden in compact mode */}
+      {!compact && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => setActiveCategory('All')}
+            className={`px-3 py-1.5 rounded-full text-sm font-crimson border transition-all duration-200 ${
+              activeCategory === 'All'
+                ? 'bg-[#0D9488]/20 border-[#0D9488]/60 text-[#0D9488]'
+                : 'bg-transparent border-white/10 text-white/50 hover:border-white/20'
+            }`}
+          >
+            All ({items.length})
+          </button>
+          {CATEGORIES.filter(cat => items.some(i => i.category === cat)).map(cat => {
+            const count = items.filter(i => i.category === cat).length;
+            return (
+              <button
+                key={cat}
+                onClick={() => setActiveCategory(cat)}
+                className={`px-3 py-1.5 rounded-full text-sm font-crimson border transition-all duration-200 ${
+                  activeCategory === cat
+                    ? 'bg-[#0D9488]/20 border-[#0D9488]/60 text-[#0D9488]'
+                    : 'bg-transparent border-white/10 text-white/50 hover:border-white/20'
+                }`}
+              >
+                {cat} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Grid */}
       {sorted.length === 0 ? (
@@ -108,17 +118,28 @@ export default function PantryGrid({ items, onUsed, onWasted, onAddItem }: Pantr
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {sorted.map((item, i) => (
-            <PantryCard
-              key={item.id}
-              item={item}
-              onUsed={onUsed}
-              onWasted={onWasted}
-              style={{ animationDelay: `${i * 40}ms` }}
-            />
-          ))}
-        </div>
+        <>
+          <div className={`grid gap-3 ${compact ? 'grid-cols-2 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4'}`}>
+            {displayed.map((item, i) => (
+              <PantryCard
+                key={item.id}
+                item={item}
+                onUsed={onUsed}
+                onWasted={onWasted}
+                compact={compact}
+                style={{ animationDelay: `${i * 40}ms` }}
+              />
+            ))}
+          </div>
+          {hiddenCount > 0 && onViewAll && (
+            <button
+              onClick={onViewAll}
+              className="self-end font-crimson text-sm text-[#0D9488] hover:text-[#0D9488]/80 transition-colors"
+            >
+              +{hiddenCount} more item{hiddenCount !== 1 ? 's' : ''} — View all →
+            </button>
+          )}
+        </>
       )}
     </div>
   );
