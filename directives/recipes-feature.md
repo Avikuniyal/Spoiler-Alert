@@ -13,6 +13,9 @@ The flow is:
 2. On mount and whenever the expiring item set changes, it calls the `fetchRecipeSuggestions` server action.
 3. The server action calls `getRecipeSuggestions` in `src/lib/recipes.ts`, which checks an in-memory cache and, if stale, fetches from Spoonacular.
 4. Results are returned to the dashboard and rendered. A skeleton loading state shows while the fetch is in-flight.
+5. If none of the results match a red-tier (expiring today/tomorrow) item, a second, dedicated `fetchRecipeSuggestions` call runs scoped to just the red item names, to make sure "Tonight's Hero" has something to show — see `directives/pantry-feature.md` §3 for the full hero-selection logic.
+6. Steps and cook time are not part of this initial fetch at all — they're fetched per-recipe, on demand, only when a user expands a card in `RecipeSuggestionsPanel` (see §5, §8, §9b).
+7. **Every result — not just the hero pick — is scored and sorted before display.** `SpoilerDashboard` computes `score = (redMatchCount × 10) + (matchedIngredients.length × 2) − (missedIngredientCount × 5)` for each recipe in the result set (`scoredRecipes` memo) and sorts descending. This sorted list, not the raw API order, is what's passed as the `recipes` prop to `RecipeSuggestionsPanel` on both the dashboard and recipes tabs. See `tests/recipe_test_plan.md` for the full formula rationale and test cases, and `directives/pantry-feature.md` §3 for how the same formula is reused (on a possibly-different candidate pool) to pick the hero.
 
 ---
 
@@ -66,7 +69,7 @@ GET https://api.spoonacular.com/recipes/findByIngredients
 | `ingredients` | `item1,+item2,+item3` | Comma-plus-separated expiring item names |
 | `number` | `6` | Max recipes to return |
 | `ranking` | `1` | Rank by maximizing matched ingredients (vs. minimizing missing ones) |
-| `ignorePantry` | `false` | Include common pantry staples in matching |
+| `ignorePantry` | `"true"` | Exclude common pantry staples (salt, oil, water, etc.) from matching — the opposite of the parameter's literal meaning; Spoonacular's naming is confusing here. `true` = don't count generic staples toward the match, so results favor recipes matching the actual expiring items rather than padding scores with things everyone already has. |
 
 **Response shape (one item):**
 
@@ -93,7 +96,7 @@ GET https://api.spoonacular.com/recipes/findByIngredients
 - Nutrition information
 - Serving size
 
-These fields require a separate call to `GET /recipes/{id}/information`, which costs additional API points. We do not make this call. Instead, we link to the full recipe page on Spoonacular (`sourceUrl`).
+These fields require a separate call to `GET /recipes/{id}/information`, which costs additional API points. We do not make this call up front for every recipe in a result set — it would burn through the free-tier quota fast (6 recipes × extra calls per pantry-item change). Instead, `findByIngredients` results always ship with `steps: []` and `cookTime: '—'` (see §5), and the `/information` call is made lazily, one recipe at a time, only when the user expands that specific recipe's card (see §5 and §8 — `getRecipeDetails` / `fetchRecipeDetails`). Every mapped `Recipe` also carries a `sourceUrl` (see §5) as a fallback link to the full recipe page on Spoonacular — but as of this writing that fallback is only actually rendered in `TonightsHeroCard` (when it has no steps to show). `RecipeSuggestionsPanel`'s expanded card view does not render `sourceUrl` at all — see §8.
 
 ---
 
@@ -108,11 +111,23 @@ These fields require a separate call to `GET /recipes/{id}/information`, which c
 | `imageUrl` | `raw.image` | Direct Spoonacular CDN URL |
 | `matchedIngredients` | `raw.usedIngredients[].name` | Ingredients from the user's pantry |
 | `allIngredients` | `[...usedIngredients, ...missedIngredients].name` | Full ingredient list for display |
-| `steps` | `[]` | Always empty — not returned by this endpoint |
-| `cookTime` | `'—'` | Not returned by this endpoint |
+| `missedIngredientCount` | `raw.missedIngredientCount` | Used directly in the hero/ranking score (see `directives/pantry-feature.md`'s hero selection logic, and `tests/recipe_test_plan.md` for the scoring formula) and in the "+N more needed" badge on `RecipeSuggestionsPanel` |
+| `steps` | `[]` | Always empty from this endpoint — populated later via `RecipeDetail`, see below |
+| `cookTime` | `'—'` | Not returned by this endpoint — same, see `RecipeDetail` below |
 | `sourceUrl` | Constructed from title + id | Links to full recipe on Spoonacular |
 
 The `sourceUrl` format: `https://spoonacular.com/recipes/{slugified-title}-{id}`. This is the standard Spoonacular URL pattern — not official API output, but stable enough for linking purposes.
+
+**`RecipeDetail` (separate type, fetched on demand):** when a user expands a recipe card, `GET /recipes/{id}/information` is called and mapped to a `RecipeDetail` object — see `src/types/pantry.ts`:
+
+| RecipeDetail field | Source | Notes |
+|---|---|---|
+| `cookTime` | `raw.readyInMinutes ?? 0` | Minutes |
+| `servings` | `raw.servings ?? 0` | |
+| `steps` | `raw.analyzedInstructions[0]?.steps[].step ?? []` | Only the first instruction set is used; recipes with multiple instruction sets (e.g. "for the sauce" / "for the filling") only surface the first one |
+| `ingredients` | `raw.extendedIngredients[].original` | Human-readable ingredient lines (e.g. "2 cloves garlic, minced"), replaces `Recipe.allIngredients` in the expanded view once loaded |
+| `summary` | `raw.summary`, HTML-stripped | Spoonacular summaries are HTML; stripped via a small regex-based `stripHtml()` helper in `src/lib/recipes.ts` |
+| `diets` | `raw.diets ?? []` | e.g. `["vegetarian", "gluten free"]` — fetched but not currently rendered anywhere in the UI |
 
 ---
 
@@ -134,19 +149,22 @@ The `sourceUrl` format: `https://spoonacular.com/recipes/{slugified-title}-{id}`
 
 **Cache behavior when API fails:** On any error (network failure, bad status code, quota exceeded), the function returns `[]` and does not populate the cache. The next request will retry the API call immediately.
 
+**Second cache for recipe details:** a separate module-level `Map` (`recipeDetailCache`, also in `src/lib/recipes.ts`) caches `RecipeDetail` results from `getRecipeDetails()`, keyed by raw recipe ID string (no sorting/joining needed — one ID per entry). Same 1-hour TTL, same in-memory/per-instance/not-persisted caveats as the suggestions cache above. On fetch failure it returns `null` and does not cache the miss, so a failed detail fetch will retry on the next expand.
+
 ---
 
 ## 7. File Map
 
 | File | Role |
 |------|------|
-| `src/lib/recipes.ts` | Spoonacular fetch + in-memory cache. Server-only. |
-| `src/app/recipe-actions.ts` | `'use server'` wrapper. The only entry point for client components. |
-| `src/components/spoiler/RecipeSuggestionsPanel.tsx` | Renders recipe cards + skeleton loading state |
-| `src/components/spoiler/SpoilerDashboard.tsx` | Calls the server action via `useEffect`, owns `recipes` + `recipesLoading` state |
-| `src/types/pantry.ts` | `Recipe` interface — `steps`, `allIngredients`, `sourceUrl` |
+| `src/lib/recipes.ts` | Spoonacular fetch (`getRecipeSuggestions`, `getRecipeDetails`) + both in-memory caches. Server-only. |
+| `src/app/recipe-actions.ts` | `'use server'` wrapper exposing `fetchRecipeSuggestions` and `fetchRecipeDetails`. The only entry point for client components. |
+| `src/components/spoiler/RecipeSuggestionsPanel.tsx` | Renders recipe cards + skeleton loading state; each card calls `fetchRecipeDetails` on expand |
+| `src/components/spoiler/TonightsHeroCard.tsx` | Renders the hero recipe; does **not** call `fetchRecipeDetails` — always uses `recipe.steps`, which is always `[]` from `findByIngredients`, so it falls back to the Spoonacular link rather than showing steps inline |
+| `src/components/spoiler/SpoilerDashboard.tsx` | Calls `fetchRecipeSuggestions` via `useEffect`, owns `recipes`/`recipesLoading`/`heroRecipes`/`heroRecipesLoading` state, computes scored rankings and the hero pick — see `directives/pantry-feature.md` §3 for the hero logic |
+| `src/types/pantry.ts` | `Recipe` interface (`steps`, `allIngredients`, `missedIngredientCount`, `sourceUrl`) and `RecipeDetail` interface (`cookTime`, `servings`, `steps`, `ingredients`, `summary`, `diets`) |
 
-**Rule:** Nothing in `src/lib/recipes.ts` or anything that imports `SPOONACULAR_API_KEY` may be imported by a client component. The only allowed client-side entry is `fetchRecipeSuggestions` from `src/app/recipe-actions.ts`.
+**Rule:** Nothing in `src/lib/recipes.ts` or anything that imports `SPOONACULAR_API_KEY` may be imported by a client component. The only allowed client-side entries are `fetchRecipeSuggestions` and `fetchRecipeDetails` from `src/app/recipe-actions.ts`.
 
 ---
 
@@ -157,22 +175,24 @@ The `sourceUrl` format: `https://spoonacular.com/recipes/{slugified-title}-{id}`
 ```ts
 {
   recipes: Recipe[];
-  expiringItems: string[];   // for the "Based on N expiring items" label
   loading?: boolean;         // defaults to false
 }
 ```
 
-**Behavior:**
-- `loading: true` → renders 3 skeleton cards with pulse animation. Header shows "Finding recipes…"
-- `loading: false, recipes: []` → renders nothing (`return null`)
-- `loading: false, recipes: [...]` → renders recipe cards
+There is no `expiringItems` prop — the header subtitle is the static text "Based on your pantry" (or "Finding recipes…" while loading), not a dynamic "Based on N expiring items" count.
 
-**Each recipe card:**
-- Shows image, title, matched ingredient badges (teal)
-- "Cook This" button expands the card
-- Expanded: shows full ingredient list with matched items highlighted in teal
-- If `steps` is empty (always, with Spoonacular): shows "View full recipe on Spoonacular" link instead
-- Cook time badge is hidden when value is `'—'`
+**Behavior:**
+- `loading: true` → renders 3 skeleton cards with pulse animation. Header subtitle shows "Finding recipes…"
+- `loading: false, recipes: []` → renders an empty-state block ("No recipe suggestions found" + a hint to add more pantry items), not `null`
+- `loading: false, recipes: [...]` → renders recipe cards, each wrapped for a staggered `card-enter` animation (40ms delay per card)
+
+**Each recipe card (`RecipeCard`, defined in the same file):**
+- Shows image, title, matched ingredient badges (teal), and a "+N more needed" badge when `missedIngredientCount > 0`
+- "Cook This" button toggles expand/collapse ("Close Recipe" when expanded)
+- On first expand, calls `fetchRecipeDetails(recipe.id)` (only once — subsequent collapse/expand cycles reuse local state, and the server-side cache in `src/lib/recipes.ts` also avoids re-hitting Spoonacular). Tracks `detailLoading` (spinner) and `detailFailed` (shows "Couldn't load recipe details") separately from the toggle state.
+- Expanded ingredient list uses `detail.ingredients` once loaded (falls back to `recipe.allIngredients` before/if the detail fetch hasn't completed or failed) — matched items are still highlighted in teal by checking membership against `recipe.matchedIngredients`
+- Steps section only renders once `detail.steps.length > 0` — since `findByIngredients` never returns steps and the lazy detail fetch is what populates them, there's a brief window (or a permanent one, on fetch failure) where the card shows no steps and no "View full recipe" link exists in the expanded panel for that case; `sourceUrl` isn't currently surfaced inside this component at all — the fallback link Section 4 describes exists at the data layer but is not rendered here as of this writing.
+- A cook-time badge overlays the image, bottom-right, but only once `detail` has loaded and `detail.cookTime > 0` — it's driven by the lazily-fetched detail, not the static `recipe.cookTime` field (which stays `'—'` and is unused in this component)
 
 ---
 
@@ -189,11 +209,24 @@ fetchRecipeSuggestions(ingredientNames: string[], count?: number): Promise<Recip
 
 ---
 
+## 9b. Server Action: `fetchRecipeDetails`
+
+**Signature:**
+```ts
+fetchRecipeDetails(recipeId: string): Promise<RecipeDetail | null>
+```
+
+**When it's called:** From `RecipeCard` (inside `RecipeSuggestionsPanel.tsx`), the first time a specific card is expanded. Not called eagerly, not called for every recipe in a result set, and not called at all by `TonightsHeroCard`.
+
+**No cancellation handling:** unlike `fetchRecipeSuggestions`'s `useEffect`, this is a direct `await` inside a click handler — there's no guard against the user collapsing the card before the fetch resolves. In practice this doesn't visibly break anything, since the result is just cached to local state and rendered only while `expanded` is true, but it's worth knowing if you're debugging a state update on an unmounted component.
+
+---
+
 ## 10. Known Limitations
 
-**Steps are never shown.** The `findByIngredients` endpoint does not return cooking instructions. To get them, we'd need to call `GET /recipes/{id}/information` for each recipe — 6 extra API calls per trigger. At 150 points/day free, this would exhaust the quota in 4 triggers. The current solution instead links to the full Spoonacular recipe page.
+**Steps and cook time are not available until a card is expanded, and can fail silently.** `findByIngredients` never returns them (`steps: []`, `cookTime: '—'` on the initial `Recipe`) — they're fetched lazily via `GET /recipes/{id}/information` only when a `RecipeSuggestionsPanel` card is expanded (see §8, §9b). This keeps the common case (browsing without expanding) to 1 API call per pantry-item-set change instead of 1 + N. But it means: (a) `TonightsHeroCard` never triggers this fetch at all, so its steps are always empty and it always falls back to the `sourceUrl` link; (b) if the lazy fetch fails, `RecipeSuggestionsPanel` shows "Couldn't load recipe details" with no retry button and no `sourceUrl` fallback link rendered in that component (see §8) — the user has no way to see the recipe at all in that failure case short of leaving the app.
 
-**Cook time is always `'—'`.** Same reason — cook time (`readyInMinutes`) is only on `/recipes/{id}/information`.
+**Detail fetches add API cost per user action, not per pantry-item change.** Each card expansion is a fresh point cost the first time that recipe ID is expanded (subsequent expands within the hour reuse `recipeDetailCache`). A user who expands all 6 cards in a result set spends 6 extra points beyond the initial `findByIngredients` call.
 
 **`sourceUrl` is a best-effort construct.** The URL is built from the recipe title slug + ID. It works for the vast majority of Spoonacular recipes but is not official API output. If a title contains non-ASCII characters or special symbols, the slug may not match the real URL.
 
@@ -205,13 +238,17 @@ fetchRecipeSuggestions(ingredientNames: string[], count?: number): Promise<Recip
 
 **Ingredient matching is Spoonacular's, not ours.** We pass raw item names (e.g. "Greek Yogurt", "Chicken Breast"). Spoonacular's matching handles synonyms and variants better than the previous substring approach, but plurals and brand names may still miss.
 
+**The pricing page promises a Free-tier limit that isn't enforced.** `src/app/pricing/page.tsx` lists "3 recipe suggestions per day" as a Free plan feature, but nothing in `getRecipeSuggestions`, `fetchRecipeSuggestions`, or `SpoilerDashboard` checks subscription tier or throttles suggestion count per day. This mirrors the unenforced 10-item pantry limit noted in `directives/pantry-feature.md`.
+
+**The hero-specific fallback call (see `directives/pantry-feature.md` §3) is a second, separate API cost.** When the main `findByIngredients` results don't include a red-item match, `SpoilerDashboard` makes an additional `fetchRecipeSuggestions` call scoped to just the red item names. This isn't reflected in the point-budget math in §3 above — a dashboard load that triggers the fallback costs up to 12 points (6 + 6) instead of 6.
+
 ---
 
 ## 11. What's Missing
 
-- **Cooking steps.** Would require `/recipes/{id}/information` calls, cached separately per recipe ID. Consider fetching lazily only when the user expands a card, and caching the result so a second expand costs nothing.
-- **Cook time.** Same as above — available from `/recipes/{id}/information`.
-- **Persistent cache.** In-memory cache doesn't survive deploys or serverless cold starts. Vercel KV or Redis would fix this.
-- **Dietary filters.** Spoonacular supports `diet=vegetarian`, `intolerances=gluten`, etc. No UI or preference system exists yet.
+- **Persistent cache.** In-memory cache doesn't survive deploys or serverless cold starts. Vercel KV or Redis would fix this. Applies to both the suggestions cache and the detail cache (`recipeDetailCache`).
+- **Dietary filters.** Spoonacular supports `diet=vegetarian`, `intolerances=gluten`, etc. `RecipeDetail.diets` is already fetched but not rendered anywhere, and there's no UI or preference system to filter by it.
 - **Recipe save/favorites.** Users can't save recipes they like. Would require a new `saved_recipes` table.
 - **Larger result set on recipes tab.** The dashboard shows recipes from a shared state of 6. The recipes tab could request more (e.g. 12) if the user has many expiring items.
+- **`sourceUrl` fallback in `RecipeSuggestionsPanel`.** Unlike `TonightsHeroCard`, the general recipe panel never renders `recipe.sourceUrl`, so a failed or empty detail fetch leaves the user with no path to the actual recipe.
+- **Free-tier suggestion-count enforcement.** See "Known Limitations" above — the pricing page claim isn't backed by code.

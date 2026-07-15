@@ -326,14 +326,20 @@ ORDER BY expiry_date ASC;
 - The dropdown renders inline in the form (not absolutely positioned) to avoid being clipped by the modal's `overflow-hidden` container.
 - Selecting a suggestion triggers the expiry auto-fill effect immediately.
 
-**Auto-fill behavior:**
-- A `useEffect` fires whenever `name`, `category`, `storageZone`, or `opened` changes.
+**Category and storage zone auto-fill:**
+- Two separate `useEffect`s, both gated on `name.trim().length >= 3`, run `getDefaultCategory(name)` and `getDefaultZone(name)` (from `src/lib/shelf-life.ts`) as the user types and set `category`/`storageZone` accordingly.
+- Each only fires if the user hasn't manually overridden that field (`categoryManuallyChanged` / `zoneManuallyChanged` flags, set the first time the user clicks a category pill or storage-zone button). Once manually changed, auto-fill for that field stops for the rest of the session — it does not resume even if the name changes again.
+- When active, an "auto-selected" label appears next to the Category / Storage Location field labels.
+- If the item name doesn't match anything in `SHELF_LIFE_DATA`, both functions return `null` and the field is left at its current value (category defaults to `'Produce'`, storage zone to `'fridge'` on modal open).
+
+**Expiry auto-fill behavior:**
+- A separate `useEffect` fires whenever `name`, `category`, `storageZone`, `opened`, or `purchaseDate` changes.
 - Requires `name.trim().length >= 3` before firing (avoids spurious matches on partial input).
 - Calls `getShelfLife(name, category, storageZone, opened)` from `src/lib/shelf-life.ts`.
-- Sets `expiryDate` to today + returned days, formatted as `YYYY-MM-DD`.
+- Base date is `purchaseDate` if set, otherwise today — so the estimate lands relative to when the item was actually bought, not always relative to today. Sets `expiryDate` to base date + returned days, formatted as `YYYY-MM-DD`.
 - Sets `expiryAutoFilled = true` so the "auto-suggested" label appears.
 - If the user types directly into the expiry date field, `expiryAutoFilled` is reset to `false`.
-- If name/category/zone/opened change again after a manual override, auto-fill runs again (intentional — new inputs = new suggestion).
+- If name/category/zone/opened/purchaseDate change again after a manual override, auto-fill runs again (intentional — new inputs = new suggestion). Note this means the expiry auto-fill has no "manually changed" lock the way category/zone do — it will keep recomputing on every relevant input change even after the user has hand-edited the date, until the *next* change to one of those inputs.
 
 **Validation (client-side only):**
 - Name must not be blank
@@ -395,12 +401,38 @@ ORDER BY expiry_date ASC;
 - Expanded: full ingredient list + steps (or Spoonacular link if steps are empty)
 
 **Hero recipe selection logic (in `SpoilerDashboard`):**
-- Filters `recipes` state to find the recipe with the most `matchedIngredients` that correspond to red-tier item names
-- Only shows if `bestScore > 0` (at least one matched ingredient from a red item)
-- Falls back to `null` (card hidden) if no match or if `recipesLoading` is still true
-- No extra API call — derives from the already-fetched `recipes` state
+- Uses the same weighted score as the general recipe ranking: `score = (redMatchCount × 10) + (matchedIngredients.length × 2) − (missedIngredientCount × 5)`, where `redMatchCount` is how many of a recipe's `matchedIngredients` overlap (case-insensitive substring match) with red-tier item names.
+- Candidate pool is `heroRecipes` if it has been populated, otherwise the main `recipes` state (see fallback below).
+- Only recipes with `redMatchCount > 0` are considered; the highest-scoring one wins. Returns `null` (card hidden) if no candidate qualifies, or while `recipesLoading`/`heroRecipesLoading` is true.
+- **Fallback API call:** after the main `recipes` finish loading, a separate `useEffect` checks whether *any* recipe in the main results has a red-item match. If none do (common when red items are less common ingredients that didn't make the top of the general ingredient-based search), it makes a **dedicated Spoonacular call** with just the red item names (`fetchRecipeSuggestions(redItemNames, 6)`) and stores the result in `heroRecipes`, which then becomes the hero-selection pool. If the main results already contain a red match, `heroRecipes` is cleared and no extra call is made — this keeps the common case to a single API call.
 
 **When it renders:** Only on the dashboard tab, above the 2-column pantry/savings grid. Not shown on the pantry or recipes tabs.
+
+---
+
+### `SavingsWidget` — `src/components/spoiler/SavingsWidget.tsx`
+
+**What it is:** The savings tracker card. Rendered twice in `SpoilerDashboard` — once in the dashboard tab's grid, once in the dedicated savings tab — both instances fed from the same `savings` state (result of `getSavingsStats(userId)`, fetched server-side and passed as `initialSavings`).
+
+**Props:**
+```ts
+{
+  totalSaved: number;
+  monthSaved: number;
+  totalUsed: number;
+  totalWasted: number;
+  sparklineData: { day: number; value: number }[]; // last 7 days
+}
+```
+
+**What it renders:**
+- Total saved dollar amount, animated on change via a local `AnimatedNumber` component (600ms ease-out cubic tween from the previous value to the new one on every prop update)
+- "+$X this month" line, only shown if `monthSaved > 0`
+- A 7-day sparkline (`recharts` `AreaChart`) built from `sparklineData`
+- A three-column stats row: `totalUsed` count, `totalWasted` count, and a computed "Used Rate" percentage
+- Used Rate = `totalUsed / (totalUsed + totalWasted) * 100`, rounded; shows `0%` if both are zero. Color-coded: teal at ≥70%, amber at ≥40%, red below that.
+
+**Data source:** All five props trace back to `getSavingsStats()` in `pantry-actions.ts` (§2 above) — `totalSaved`, `totalUsed`, `totalWasted`, `monthSaved`, and `sparklineData` (last-7-days `food_logs` aggregation) are returned together as one object and threaded through as the `savings` state.
 
 ---
 
@@ -433,13 +465,19 @@ export type StorageZone = 'fridge' | 'freezer' | 'pantry';
 4. If the matched zone value is 0 (not recommended for that zone), breaks and falls through to step 5.
 5. If no name match, falls through to category default from `CATEGORY_DEFAULTS`.
 
-**Data coverage:** 38 named items across Produce, Dairy, Meat, Pantry Staples, Frozen, and Beverages. Category fallbacks cover: Produce, Dairy, Meat, Seafood, Leftovers, Pantry Staples, Bakery, Frozen, Beverages, Other.
+**Data coverage:** 48 named-item entries (157 name/alias strings total, since many entries list multiple aliases like `['strawberry', 'strawberries']`) across Produce (17), Dairy (8), Meat (8), Pantry Staples (8), Frozen (3), Beverages (3), and Bakery (1). Category fallbacks cover: Produce, Dairy, Meat, Seafood, Leftovers, Pantry Staples, Bakery, Frozen, Beverages, Other.
 
 **Limitations of the current lookup:**
 - Substring matching is loose. "rice" matches both "white rice" and "licorice" (though licorice is not in the table). Always check for false positives when adding new entries.
 - Values are USDA midpoints — not label dates, not actual package expiry. They are estimates for general guidance.
 - No fuzzy matching or synonym resolution. "Whole milk" matches the "milk" entry; "dairy milk" does not.
 - The data is hardcoded. Updates require editing the source file and redeploying.
+
+### Other exports from `shelf-life.ts`
+
+- **`FOOD_SUGGESTIONS`** — all known food names, title-cased and deduplicated, sorted. Powers `AddItemModal`'s typeahead (see below).
+- **`getDefaultCategory(itemName)`** — returns the `defaultCategory` of the first matching `SHELF_LIFE_DATA` entry (same substring-match logic as `getShelfLife`), or `null` if no match. Used by `AddItemModal` to auto-select a category as the user types.
+- **`getDefaultZone(itemName)`** — same idea, returns the entry's `defaultZone` (e.g. avocados default to `'pantry'` since they're usually bought unripe and ripened on the counter, even though most produce defaults to `'fridge'`), or `null` if no match. Used by `AddItemModal` to auto-select a storage zone as the user types.
 
 ---
 
@@ -503,7 +541,7 @@ These are issues in the current code that will cause bugs or security problems a
 
 ---
 
-## 6. What's Missing to Complete This Feature
+## 7. What's Missing to Complete This Feature
 
 Based on the product design evident in the codebase — expiry tracking, recipe matching, and food waste reduction — here is what is not yet built.
 
@@ -524,7 +562,7 @@ Based on the product design evident in the codebase — expiry tracking, recipe 
 **Product features not yet started**
 
 - **Expiry notifications.** The `ExpiryAlertStrip` shows alerts inside the app, but there is nothing that notifies the user outside the app. A daily cron job checking for items expiring in 1–3 days and sending an email or push notification is needed for the core value proposition to work passively.
-- **Barcode scanning.** The UI placeholder exists in `AddItemModal`. Not wired to any camera or barcode lookup API. Most food items have barcodes — this dramatically reduces friction for adding items.
-- **Richer recipe data.** `lib/recipes.ts` calls the Spoonacular `findByIngredients` API. This endpoint does not return cooking steps or cook times — a separate `/recipes/{id}/information` call is needed for each recipe. See `directives/recipes-feature.md` for the full constraint breakdown.
+- **Barcode scanning.** The UI placeholder exists in `AddItemModal`. Not wired to any camera or barcode lookup API. Most food items have barcodes — this dramatically reduces friction for adding items. (Separately, there's an experimental, disconnected receipt-OCR prototype at the repo root — see `index.html` note in `CLAUDE.md` and `README.md`. It's not barcode scanning and isn't wired into this app; don't confuse the two.)
+- **~~Richer recipe data~~ — implemented, but only in `RecipeSuggestionsPanel`.** `lib/recipes.ts`'s `findByIngredients` call still doesn't return cooking steps or cook times, but a lazy per-recipe `/recipes/{id}/information` fetch (`getRecipeDetails`) now supplies them on card expansion. What's still missing: `TonightsHeroCard` never calls this lazy fetch, so its steps are always empty; and `RecipeSuggestionsPanel` doesn't render the `sourceUrl` fallback link when the lazy fetch fails. See `directives/recipes-feature.md` §5, §8, §10 for the full breakdown.
 - **Household/shared pantry.** The entire data model is single-user. There is no concept of a shared household pantry that multiple family members can contribute to.
 - **Export / history view.** Users can see a 7-day sparkline but cannot view their full log history, filter by date range, or export a CSV of what they've saved/wasted.

@@ -28,13 +28,12 @@ Scanning is a **capture and confirmation** tool, not an autonomous inventory man
 
 ## 2. Schema note — real vs. described
 
-`CLAUDE.md` describes an `inventory_items` table with a `source` column whose enum already includes `'scanner'`. **That table does not exist.** The real, implemented table per `pantry-feature.md` is `public.pantry_items`, and it has no `source` column at all.
+The real, implemented table per `pantry-feature.md` (and now correctly reflected in `CLAUDE.md` as of the July 2026 documentation pass) is `public.pantry_items`, and it has no `source` column.
 
 This plan targets the real schema. Two consequences:
 
 - Writing scanner-originated items reuses the existing `pantry_items` insert path (`addPantryItem` or a sibling action), not a new table.
 - Distinguishing "added by scanner" from "added by hand" requires a new nullable `source text` column on `pantry_items` (values: `manual`, `scanner` — extend later if barcode/receipt ship). **This is a schema change and requires user confirmation before migration**, per `CLAUDE.md`. Until approved, scanner-added items are indistinguishable from manually-added ones — acceptable for a v1, but should be called out in the PR.
-- Someone should reconcile `CLAUDE.md`'s schema description with reality independent of this feature — not in scope here, but flagging it since it will confuse the next person who reads `CLAUDE.md` first.
 
 ---
 
@@ -107,7 +106,7 @@ No action here should be added until directive review confirms scope, per "Read 
 
 ## 6. Profile-mode considerations
 
-Per `CLAUDE.md`'s non-negotiable rule, family vs. performance mode framing must not leak. Scanning results themselves are mode-agnostic (an item is an item), but any UI copy surfacing scan results (e.g. "3 items need checking") must route through the same `profile_type`-gated component pattern used elsewhere — no macro/efficiency framing in family mode, no savings/environmental framing in performance mode.
+The MVP doc calls for family vs. performance mode framing to never leak into UI copy. As noted in `CLAUDE.md`, this split is **not currently implemented anywhere in the codebase** — there is no `profile_type` field and no existing gated-component pattern to route through. If profile modes are still built before this feature ships, scan-result copy should follow whatever pattern is established then (mode-agnostic on the data side — an item is an item — but copy like "3 items need checking" would need the same treatment as other user-facing text). If profile modes are never built, this section is moot. Either way, don't invent profile-mode gating for this feature in isolation.
 
 ---
 

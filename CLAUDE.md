@@ -8,7 +8,7 @@ This file is your briefing document. Read it at the start of every session befor
 
 Spoiler Alert is a household food management web app built with Next.js and Supabase. The core loop: users add food to their pantry/fridge, the app tracks expiry dates using USDA shelf-life data, and when something is about to go bad it surfaces a recipe suggestion (Tonight's Hero) that uses that ingredient first.
 
-There are two user modes set at onboarding and never mixed: **family** mode (speed, kid-friendliness, dollar savings) and **performance** mode (macro tracking, protein utilization, efficiency scores). Every feature decision must respect this split — never show macro data to family users, never show community/environmental messaging to performance users.
+The original product plan calls for two user modes set at onboarding and never mixed: **family** mode (speed, kid-friendliness, dollar savings) and **performance** mode (macro tracking, protein utilization, efficiency scores) — see the MVP doc for the full rationale. **This has not been built.** There is no `profile_type` field, no onboarding step for it, and no component in this codebase gates on it. Treat the family/performance split as a planned direction to keep in mind when designing future UI copy and scoring, not as something currently enforced — see "Rules that are never negotiable" below for the corrected status.
 
 The MVP is four features only: inventory + shelf life, Tonight's Hero recipe suggestion, expiry alerts, and savings tracking. Do not build post-MVP features unless explicitly instructed.
 
@@ -50,7 +50,7 @@ You need to understand what each piece of the stack does so you use the right to
 
 **Next.js App Router** is the framework. Pages live in `src/app/` and use file-based routing. API routes live in `src/app/api/`. Server Actions (functions that run server-side but are called from components) live in `actions.ts` and `pantry-actions.ts`. Prefer Server Actions over API routes for simple data mutations — they're less boilerplate. Use API routes for anything that needs to be called from outside Next.js or needs specific HTTP verbs.
 
-**Supabase** is the database and auth layer. The client is initialized in `src/lib/` — use the existing client, do not create a new one. Row-level security is enabled, which means queries automatically scope to the logged-in user. Never use the service role key client-side — it bypasses RLS and is a security vulnerability.
+**Supabase** is the database and auth layer. The client is initialized in the top-level `supabase/` folder (`supabase/server.ts` for server components/actions, `supabase/client.ts` for client components) — use the existing client, do not create a new one. Row-level security is enabled project-wide, but as of this writing it has **not** been applied to `pantry_items` or `food_logs` specifically — see "Known limitations" in `directives/pantry-feature.md`. Never use the service role key client-side — it bypasses RLS and is a security vulnerability.
 
 **TypeScript** is used throughout. Always define types for function parameters and return values. Never use `any` unless absolutely unavoidable, and if you do, leave a comment explaining why.
 
@@ -60,29 +60,27 @@ You need to understand what each piece of the stack does so you use the right to
 
 **Spoonacular** provides recipe data. The fetching logic lives in `src/lib/recipes.ts`. Always cache Spoonacular responses — the free tier has a daily request limit. Never call Spoonacular client-side; always proxy through a server action or API route to keep the API key hidden.
 
-**USDA FoodKeeper** shelf-life data is embedded as static JSON. It does not require an API call. When computing `expires_at` for a new inventory item, use this data — category + storage zone + opened/sealed status maps to a day range. Use the midpoint of the range for the default expiry window.
+**USDA FoodKeeper** shelf-life data is embedded as a static TypeScript module (`src/lib/shelf-life.ts`), not a JSON file or external API call. When computing `expiry_date` for a new `pantry_items` row, use this data — category + storage zone + opened/sealed status maps to a day range. Use the midpoint of the range for the default expiry window.
 
 ---
 
 ## Database schema (Supabase)
 
-These are the core tables. Do not add columns or create new tables without updating this section and the relevant directive.
+These are the core tables. Do not add columns or create new tables without updating this section and the relevant directive. Full column-by-column detail (types, defaults, nullability, indexes, RLS status) lives in `directives/pantry-feature.md` §1 — this is a summary, that file is authoritative.
 
-`inventory_items` — id, user_id, name, category, quantity, unit, storage_zone, status (active | used | wasted | frozen), source (voice | quick_add | barcode | receipt | scanner), opened (boolean), added_at, expires_at, used_at, price_cents.
+`pantry_items` — id, user_id, name, category, purchase_date, expiry_date, status (active | used | wasted), estimated_cost, storage_zone (fridge | freezer | pantry, nullable), opened (boolean), created_at, updated_at. This is the actual inventory table — there is no separate `inventory_items` table.
 
-`waste_log` — id, inventory_item_id, reason (expired | manual), logged_at.
+`food_logs` — id, user_id, item_id (FK → `pantry_items.id`, nullable), item_name, category, action (used | wasted), savings_amount, logged_at. Append-only. This is what `getSavingsStats` reads to compute the savings tracker — there is no separate `savings` table.
 
-`suggestions` — id, user_id, recipe_id, trigger_item_id (the expiring item that triggered this), suggested_at, status (shown | cooked | skipped | rejected), profile_type.
+Recipe suggestions and their scores are **not persisted**. They're fetched from Spoonacular on the client (via server action), scored, and cached in-memory (`src/lib/recipes.ts`) — there is no `suggestions` table. There is also no nudge engine and no `nudges` table; the nudge engine described in the product plan is post-MVP and unbuilt.
 
-`nudges` — id, user_id, type (quantity | swap | timing | pre_shop | freeze), message, delivered_at, status (pending | acted | dismissed).
-
-`savings` — user_id, month, items_saved_count, dollars_saved, protein_utilization_pct.
+Auth and billing use a separate set of tables from the starter template — `users`, `subscriptions`, `webhook_events` (see `supabase/migrations/initial-setup.sql`) — which are out of scope for this section and not touched by pantry/recipe work.
 
 ---
 
 ## Rules that are never negotiable
 
-**Never mix profile types.** Family users never see macros, protein utilization, or efficiency scores. Performance users never see community messaging, environmental guilt framing, or dollar-savings-as-experiences. This is enforced at the component level using the `profile_type` field on the user record.
+**Family/performance profile split is planned, not built — do not assume it exists.** The MVP doc calls for `profile_type`-gated copy and scoring (family users never see macros/efficiency scores; performance users never see community/environmental framing). As of this writing there is no `profile_type` field on `users`, no onboarding step that collects it, and no component anywhere that gates on it. If you're asked to build onboarding, scoring, or copy that depends on this split, flag that it requires new schema and product decisions first — don't invent a `profile_type` value or gate logic on an assumed one.
 
 **Never call Spoonacular client-side.** The API key must stay server-side. Always route through a server action or API route.
 
@@ -110,9 +108,13 @@ These are the core tables. Do not add columns or create new tables without updat
 
 `directives/` — SOPs for each feature area. Read before building. Update after learning.
 
-`supabase/` — database migrations and generated types. Run `supabase gen types typescript` after any schema change to keep types in sync.
+`index.html` (repo root) — an experimental, disconnected prototype: client-side receipt OCR using Tesseract.js that downloads a `.txt` file. It is not part of the Next.js app, is not linked from any page, and does not write to `pantry_items`. Do not treat it as a working receipt-scan feature or build on top of it without confirming with the user first — it predates any receipt-scan directive and uses a different OCR approach (Tesseract.js in-browser) than anything decided on for this project.
 
-`.tmp/` — temporary files used during processing. Never commit. Always regenerated.
+`supabase/` — database migrations, generated types, and the Supabase client (`server.ts`, `client.ts`). Also owns session/auth middleware logic (`supabase/middleware.ts`, see below). Run `supabase gen types typescript` after any schema change to keep types in sync.
+
+`.tmp/` — use this directory for your own scratch/working files during a session (drafts, intermediate output, anything you don't want committed). It does not exist yet as of this writing — create it if you need it. Never commit its contents; it should be safe to delete between sessions.
+
+**Middleware/proxy:** `src/proxy.ts` is the active Next.js middleware entry point — it delegates session refresh and route protection to `updateSession()` in `supabase/middleware.ts`. There is also a root-level `proxy.ts` with a different, simpler implementation (no route-protection redirect logic) that is **not** the active one — it's a stale duplicate left over from an earlier iteration. Do not edit the root `proxy.ts` expecting it to affect routing; the live logic is `src/proxy.ts` → `supabase/middleware.ts`.
 
 ---
 
