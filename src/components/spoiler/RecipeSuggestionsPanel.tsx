@@ -2,12 +2,15 @@
 
 import { Recipe, RecipeDetail } from "@/types/pantry";
 import { useState } from "react";
-import { Clock, ChevronDown, ChevronUp, Utensils } from "lucide-react";
+import { Clock, ChevronDown, ChevronUp, Utensils, RefreshCw } from "lucide-react";
 import { fetchRecipeDetails } from "@/app/recipe-actions";
 
 interface RecipeSuggestionsPanelProps {
   recipes: Recipe[];
   loading?: boolean;
+  typeLabels?: string[];
+  onViewAll?: () => void;
+  onRefresh?: () => void;
 }
 
 function SkeletonCard() {
@@ -26,7 +29,13 @@ function SkeletonCard() {
   );
 }
 
-function RecipeCard({ recipe }: { recipe: Recipe }) {
+const TYPE_LABEL_STYLES: Record<string, string> = {
+  Meal: "bg-[#0D9488]/15 border-[#0D9488]/30 text-[#0D9488]",
+  Snack: "bg-amber-500/10 border-amber-500/25 text-amber-400",
+  Dessert: "bg-pink-500/10 border-pink-500/25 text-pink-400",
+};
+
+function RecipeCard({ recipe, typeLabel }: { recipe: Recipe; typeLabel?: string }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<RecipeDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -59,11 +68,11 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
           className="w-full h-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#111111] to-transparent" />
-        {detail && detail.cookTime > 0 && (
+        {(recipe.cookTime !== "—" || (detail && detail.cookTime > 0)) && (
           <div className="absolute bottom-2 right-2 flex items-center gap-1 px-2 py-1 bg-black/60 rounded-full">
             <Clock size={10} className="text-white/60" />
             <span className="font-crimson text-xs text-white/60">
-              {detail.cookTime} min
+              {detail && detail.cookTime > 0 ? `${detail.cookTime} min` : recipe.cookTime}
             </span>
           </div>
         )}
@@ -71,6 +80,11 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
 
       {/* Content */}
       <div className="p-4 flex flex-col gap-3">
+        {typeLabel && (
+          <span className={`self-start px-2 py-0.5 border rounded-full text-xs font-crimson ${TYPE_LABEL_STYLES[typeLabel] ?? "bg-white/10 border-white/20 text-white/60"}`}>
+            {typeLabel}
+          </span>
+        )}
         <h3 className="font-playfair text-base font-semibold text-white leading-tight">
           {recipe.title}
         </h3>
@@ -187,6 +201,9 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
 export default function RecipeSuggestionsPanel({
   recipes,
   loading = false,
+  typeLabels,
+  onViewAll,
+  onRefresh,
 }: RecipeSuggestionsPanelProps) {
   if (!loading && recipes.length === 0) {
     return (
@@ -210,9 +227,21 @@ export default function RecipeSuggestionsPanel({
         <h2 className="font-playfair text-xl font-bold text-white">
           Recipe Suggestions
         </h2>
-        <span className="font-crimson text-sm text-white/40">
-          {loading ? "Finding recipes…" : "Based on your pantry"}
-        </span>
+        <div className="flex items-center gap-3">
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              disabled={loading}
+              className="flex items-center gap-1.5 font-crimson text-sm text-white/40 hover:text-white/70 disabled:opacity-30 transition-colors"
+            >
+              <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          )}
+          <span className="font-crimson text-sm text-white/40">
+            {loading ? "Finding recipes…" : "Based on your pantry"}
+          </span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -229,11 +258,20 @@ export default function RecipeSuggestionsPanel({
               className="card-enter"
               style={{ animationDelay: `${i * 40}ms` }}
             >
-              <RecipeCard recipe={recipe} />
+              <RecipeCard recipe={recipe} typeLabel={typeLabels?.[i]} />
             </div>
           ))
         )}
       </div>
+
+      {onViewAll && !loading && (
+        <button
+          onClick={onViewAll}
+          className="self-end font-crimson text-sm text-[#0D9488] hover:text-[#0D9488]/80 transition-colors"
+        >
+          View all recipes →
+        </button>
+      )}
     </div>
   );
 }

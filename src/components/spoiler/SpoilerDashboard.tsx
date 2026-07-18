@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { PantryItem, FoodCategory, Recipe, getUrgency } from "@/types/pantry";
-import { fetchRecipeSuggestions } from "@/app/recipe-actions";
+import { fetchRecipeSuggestions, fetchDashboardRecipes } from "@/app/recipe-actions";
 import SpoilerSidebar, {
   SpoilerBottomNav,
 } from "@/components/spoiler/SpoilerSidebar";
@@ -50,6 +50,9 @@ export default function SpoilerDashboard({
   const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [recipesLoading, setRecipesLoading] = useState(true);
+  const [dashboardRecipes, setDashboardRecipes] = useState<{ recipe: Recipe; label: string }[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardOffset, setDashboardOffset] = useState(0);
 
   // Hero-specific recipe results — only populated when main results lack a red-item match.
   // Avoids an extra API call in the common case where the main call already covers it.
@@ -185,7 +188,7 @@ export default function SpoilerDashboard({
   useEffect(() => {
     let cancelled = false;
     setRecipesLoading(true);
-    fetchRecipeSuggestions(allItemNames, 6).then((data) => {
+    fetchRecipeSuggestions(allItemNames, 15).then((data) => {
       if (!cancelled) {
         setRecipes(data);
         setRecipesLoading(false);
@@ -197,6 +200,25 @@ export default function SpoilerDashboard({
     // allItemNamesKey is the stable dep; allItemNames is the actual value passed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allItemNamesKey]);
+
+  // Fetch typed dashboard recipes (meal / snack / dessert) via complexSearch.
+  // Re-runs when pantry items change or user hits refresh (dashboardOffset bumps).
+  useEffect(() => {
+    if (allItemNames.length === 0) {
+      setDashboardLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setDashboardLoading(true);
+    fetchDashboardRecipes(allItemNames, dashboardOffset).then((data) => {
+      if (!cancelled) {
+        setDashboardRecipes(data);
+        setDashboardLoading(false);
+      }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allItemNamesKey, dashboardOffset]);
 
   const handleAddItem = useCallback(
     async (data: {
@@ -334,11 +356,17 @@ export default function SpoilerDashboard({
                   onUsed={handleUsed}
                   onWasted={handleWasted}
                   onAddItem={() => setShowAddModal(true)}
+                  compact
+                  maxItems={6}
+                  onViewAll={() => setActiveTab("pantry")}
                 />
-                {(recipesLoading || items.length > 0) && (
+                {(dashboardLoading || dashboardRecipes.length > 0) && (
                   <RecipeSuggestionsPanel
-                    recipes={scoredRecipes.map((s) => s.recipe)}
-                    loading={recipesLoading}
+                    recipes={dashboardRecipes.map((d) => d.recipe)}
+                    typeLabels={dashboardRecipes.map((d) => d.label)}
+                    loading={dashboardLoading}
+                    onViewAll={() => setActiveTab("recipes")}
+                    onRefresh={() => setDashboardOffset((n) => n + 1)}
                   />
                 )}
               </div>
@@ -359,7 +387,7 @@ export default function SpoilerDashboard({
                   </h4>
                   <ul className="flex flex-col gap-2">
                     {[
-                      "Store herbs in water like flowers to extend freshness",
+                      "Store herbs like flowers in water to extend freshness",
                       "Keep bananas separate — ethylene gas ripens nearby produce",
                       "Freeze bread before it goes stale",
                     ].map((tip, i) => (

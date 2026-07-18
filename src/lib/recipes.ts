@@ -72,12 +72,45 @@ function buildCacheKey(ingredients: string[]): string {
   return [...ingredients].sort().join(",").toLowerCase();
 }
 
-function mapToRecipe(raw: SpoonacularRecipe): Recipe {
-  const usedNames = raw.usedIngredients.map((i) => i.name);
-  const allNames = [...raw.usedIngredients, ...raw.missedIngredients].map(
-    (i) => i.name,
+// Strips common personal/superlative/marketing prefixes and suffixes from titles.
+function cleanTitle(title: string): string {
+  let cleaned = title;
+
+  // Strip leading personal/superlative/filler words
+  cleaned = cleaned.replace(
+    /^(my (favourite|favorite|go-to|easy|simple|quick|best)|grandma'?s?|the best|easy|simple|quick|homemade|classic|perfect)\s+/i,
+    '',
   );
-  // Spoonacular recipe page URL format is well-known and stable.
+
+  // Truncate at sponsored-result suffixes
+  for (const pat of [/ serves a /i, / - a /i, / by /i]) {
+    const idx = cleaned.search(pat);
+    if (idx > 10) cleaned = cleaned.slice(0, idx);
+  }
+
+  // Hard cap at 50 chars, break at last space
+  if (cleaned.length > 50) {
+    const cut = cleaned.slice(0, 50).lastIndexOf(' ');
+    cleaned = cleaned.slice(0, cut > 15 ? cut : 50) + '…';
+  }
+
+  // Capitalise first letter after stripping
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1).trim();
+}
+
+// Filters out ingredient strings that are clearly product descriptions, not
+// ingredient names (Spoonacular occasionally returns these for branded items).
+function cleanIngredient(name: string): boolean {
+  if (name.length > 45) return false;
+  if (/handmade|artisan|truly|dairy-free dollop/i.test(name)) return false;
+  return true;
+}
+
+function mapToRecipe(raw: SpoonacularRecipe): Recipe {
+  const usedNames = raw.usedIngredients.map((i) => i.name).filter(cleanIngredient);
+  const allNames = [...raw.usedIngredients, ...raw.missedIngredients]
+    .map((i) => i.name)
+    .filter(cleanIngredient);
   const slug = raw.title
     .toLowerCase()
     .replace(/\s+/g, "-")
@@ -85,12 +118,12 @@ function mapToRecipe(raw: SpoonacularRecipe): Recipe {
 
   return {
     id: String(raw.id),
-    title: raw.title,
+    title: cleanTitle(raw.title),
     imageUrl: raw.image,
     matchedIngredients: usedNames,
     allIngredients: allNames,
     missedIngredientCount: raw.missedIngredientCount,
-    steps: [], // findByIngredients does not return steps — see sourceUrl
+    steps: [],
     cookTime: "—",
     sourceUrl: `https://spoonacular.com/recipes/${slug}-${raw.id}`,
   };
@@ -163,6 +196,95 @@ export async function getRecipeSuggestions(
   } catch (err) {
     console.error("[recipes] Failed to fetch from Spoonacular:", err);
     return [];
+  }
+}
+
+// ── complexSearch (type-filtered) ────────────────────────────────────────────
+
+interface SpoonacularComplexResult {
+  id: number;
+  title: string;
+  image: string;
+  readyInMinutes?: number;
+  usedIngredientCount?: number;
+  missedIngredientCount?: number;
+  usedIngredients?: SpoonacularIngredient[];
+  missedIngredients?: SpoonacularIngredient[];
+}
+
+interface SpoonacularComplexResponse {
+  results: SpoonacularComplexResult[];
+}
+
+/**
+ * Fetch one popular recipe of a specific meal type for the dashboard.
+ *
+ * Key decisions based on API testing:
+ * - No ingredient filtering: includeIngredients returns 0 results for snack/dessert
+ *   and triggers a second call that hits the 1 req/s rate limit (429).
+ * - sort=popularity: gives mass-appealing, well-known recipes.
+ * - addRecipeInformation=true: includes readyInMinutes in the response.
+ * - offset: lets the refresh button cycle through different results.
+ * - Callers must space calls ≥700ms apart (free tier rate limit).
+ */
+export async function getRecipesByType(
+  type: string,
+  offset: number = 0,
+): Promise<Recipe | null> {
+  const apiKey = process.env.SPOONACULAR_API_KEY;
+  if (!apiKey) return null;
+
+  const cacheKey = `complexSearch:${type}:${offset}`;
+  const cached = recipeCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.data[0] ?? null;
+
+  const params = new URLSearchParams({
+    type,
+    number: '1',
+    offset: String(offset),
+    sort: 'popularity',
+    sortDirection: 'desc',
+    addRecipeInformation: 'true',
+    cuisine: 'american,italian,mexican',
+  });
+
+  try {
+    const res = await fetch(
+      `${SPOONACULAR_BASE}/recipes/complexSearch?${params}`,
+      {
+        cache: 'no-store',
+        headers: {
+          'X-RapidAPI-Key': apiKey,
+          'X-RapidAPI-Host': 'spoonacular-recipe-food-nutrition-v1.p.rapidapi.com',
+        },
+      },
+    );
+
+    if (!res.ok) {
+      console.error(`[recipes] complexSearch error (${type}): ${res.status} ${res.statusText}`);
+      return null;
+    }
+
+    const json: SpoonacularComplexResponse = await res.json();
+    if (!json.results?.length) return null;
+
+    const r = json.results[0];
+    const recipe = mapToRecipe({
+      id: r.id,
+      title: r.title,
+      image: r.image,
+      usedIngredientCount: 0,
+      missedIngredientCount: 0,
+      usedIngredients: [],
+      missedIngredients: [],
+    });
+    if (r.readyInMinutes && r.readyInMinutes > 0) recipe.cookTime = `${r.readyInMinutes} min`;
+
+    recipeCache.set(cacheKey, { data: [recipe], expiresAt: Date.now() + CACHE_TTL_MS });
+    return recipe;
+  } catch (err) {
+    console.error('[recipes] complexSearch failed:', err);
+    return null;
   }
 }
 
