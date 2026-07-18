@@ -110,6 +110,8 @@ Auth and billing use a separate set of tables from the starter template — `use
 
 `directives/` — SOPs for each feature area. Read before building. Update after learning.
 
+`__tests__/` — Vitest test suite. Mirror the `src/` structure: `__tests__/lib/`, `__tests__/app/`, `__tests__/types/`. Helper utilities (Supabase test client, cleanup) live in `__tests__/helpers/`. Run with `npm test` (watch mode) or `npm run test:run` (single run).
+
 `index.html` (repo root) — an experimental, disconnected prototype: client-side receipt OCR using Tesseract.js that downloads a `.txt` file. It is not part of the Next.js app, is not linked from any page, and does not write to `pantry_items`. Do not treat it as a working receipt-scan feature or build on top of it without confirming with the user first — it predates any receipt-scan directive and uses a different OCR approach (Tesseract.js in-browser) than anything decided on for this project.
 
 `supabase/` — database migrations, generated types, and the Supabase client (`server.ts`, `client.ts`). Also owns session/auth middleware logic (`supabase/middleware.ts`, see below). Run `supabase gen types typescript` after any schema change to keep types in sync.
