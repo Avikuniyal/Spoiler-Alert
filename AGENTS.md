@@ -38,6 +38,8 @@ The reason for this separation is error compounding. If you try to do everything
 
 **Test immediately.** After generating code, confirm it compiles and the relevant behavior works as described. Report the exact error if something fails — do not paraphrase errors.
 
+**Use static type checkers and testing suites.** Run TypeScript type checking (`npx tsc --noEmit` or the project's typecheck command) and any existing test suites (e.g., `npm test`, `jest`, `vitest`) before considering code complete. Static analysis catches type errors, null references, and interface mismatches that runtime testing misses. Testing suites validate behavior against expected outcomes. Both must pass before code is considered done — do not skip these steps even for "obvious" changes.
+
 **Self-anneal when things break.** When something fails: read the error and stack trace, fix the root cause (not the symptom), test again, and then update the relevant directive with what you learned — new API constraints, timing issues, edge cases, whatever caused the break. The system should be stronger after every failure.
 
 **Update directives as you learn, but never overwrite without asking.** Directives are living documents. When you discover something new — an API rate limit, a Supabase quirk, a better approach — add it to the directive. But never delete or replace directive content without confirming with the user first. Directives are the institutional memory of this project.
